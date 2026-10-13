@@ -1,0 +1,751 @@
+{
+  "version": "2.0",
+  "repositorio_nombre": "Repositorio Central de Juan Yaya",
+  "repositorio_version": "2.0",
+  "repositorio_propietario": "Juan Yaya - Administrador Maestro",
+  "updatedAt": "2026-10-09T15:26:10.620Z",
+  "usuarios": [
+    {
+      "id_usuario": 1,
+      "nombre_completo": "Juan Yaya - Administrador Maestro",
+      "email": "automatizaciones@tlm.net.co",
+      "hashed_password": "admin_hashed_token",
+      "rol": "Administrador",
+      "activo": true,
+      "empresas_ids": [
+        1,
+        2
+      ],
+      "permisos": {
+        "administrador": true,
+        "auditoria_ubl": true,
+        "impuestos_f350": true,
+        "conciliacion_bancaria": true,
+        "transmitir_siigo": true,
+        "gestion_usuarios": true
+      },
+      "avatar_url": null
+    },
+    {
+      "id_usuario": 2,
+      "nombre_completo": "María Paula Gómez (Contadora Senior)",
+      "email": "maria.gomez@tlm.net.co",
+      "hashed_password": "contador_hash",
+      "rol": "Contador",
+      "activo": true,
+      "empresas_ids": [
+        1
+      ],
+      "permisos": {
+        "administrador": false,
+        "auditoria_ubl": true,
+        "impuestos_f350": true,
+        "conciliacion_bancaria": true,
+        "transmitir_siigo": true,
+        "gestion_usuarios": false
+      }
+    },
+    {
+      "id_usuario": 3,
+      "nombre_completo": "Carlos Rodríguez (Analista Fiscal)",
+      "email": "carlos.analista@tlm.net.co",
+      "hashed_password": "analista_hash",
+      "rol": "Analista",
+      "activo": true,
+      "empresas_ids": [
+        1
+      ],
+      "permisos": {
+        "administrador": false,
+        "auditoria_ubl": true,
+        "impuestos_f350": true,
+        "conciliacion_bancaria": false,
+        "transmitir_siigo": false,
+        "gestion_usuarios": false
+      }
+    },
+    {
+      "id_usuario": 4,
+      "nombre_completo": "Sofía Herrera (Revisor Fiscal)",
+      "email": "sofia.revisor@externo.co",
+      "hashed_password": "pending_hash",
+      "rol": "Auditor",
+      "activo": false,
+      "empresas_ids": [
+        1
+      ],
+      "permisos": {
+        "administrador": false,
+        "auditoria_ubl": true,
+        "impuestos_f350": false,
+        "conciliacion_bancaria": false,
+        "transmitir_siigo": false,
+        "gestion_usuarios": false
+      }
+    },
+    {
+      "id_usuario": 5,
+      "nombre_completo": "Andrés Felipe Morales (Especialista Tributario)",
+      "email": "andres.morales@tlm.net.co",
+      "hashed_password": "colab_andres_token",
+      "rol": "Contador",
+      "activo": true,
+      "empresas_ids": [
+        1,
+        2
+      ],
+      "permisos": {
+        "administrador": false,
+        "auditoria_ubl": true,
+        "impuestos_f350": true,
+        "conciliacion_bancaria": true,
+        "transmitir_siigo": true,
+        "gestion_usuarios": false
+      }
+    },
+    {
+      "id_usuario": 6,
+      "nombre_completo": "Valentina Castro Rincón (Gestora de Operaciones & UBL)",
+      "email": "valentina.castro@tlm.net.co",
+      "hashed_password": "colab_valentina_token",
+      "rol": "Analista",
+      "activo": true,
+      "empresas_ids": [
+        1,
+        2
+      ],
+      "permisos": {
+        "administrador": false,
+        "auditoria_ubl": true,
+        "impuestos_f350": true,
+        "conciliacion_bancaria": true,
+        "transmitir_siigo": false,
+        "gestion_usuarios": false
+      }
+    },
+    {
+      "id_usuario": 7,
+      "nombre_completo": "Juan David Ramírez",
+      "email": "juan.ramirez@tlm.net.co",
+      "hashed_password": "hash_JuanRecuperado2026!",
+      "rol": "Analista",
+      "activo": true,
+      "requiere_cambio_password": false,
+      "empresas_ids": [
+        1
+      ],
+      "permisos": {
+        "administrador": false,
+        "auditoria_ubl": true,
+        "impuestos_f350": true,
+        "conciliacion_bancaria": false,
+        "transmitir_siigo": false,
+        "gestion_usuarios": false
+      },
+      "ultimo_cambio_password": "2026-10-09T15:26:10.619Z",
+      "codigo_recuperacion": null,
+      "codigo_recuperacion_expira": null
+    }
+  ],
+  "empresas": [
+    {
+      "id_empresa": 1,
+      "nombre_comercial": "TLM Consulting S.A.S. (Principal)",
+      "nit": "901234567-8",
+      "software_erp": "SIIGO_NUBE",
+      "software_destino": "SIIGO_NUBE",
+      "siigo_username": "automatizaciones@tlm.net.co",
+      "siigo_access_key": "tlm_live_key_99342_secure",
+      "siigo_document_id": 24,
+      "logo_url": "https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=128&auto=format&fit=crop&q=80"
+    },
+    {
+      "id_empresa": 2,
+      "nombre_comercial": "Inversiones Andinas & Logística S.A.S.",
+      "nit": "900887654-2",
+      "software_erp": "SIIGO_NUBE",
+      "software_destino": "SIIGO_NUBE",
+      "siigo_username": "contabilidad@andinas.co",
+      "siigo_access_key": "andinas_key_7712",
+      "siigo_document_id": 583
+    }
+  ],
+  "facturas": [
+    {
+      "id_factura": 1,
+      "id_empresa": 1,
+      "factura_num": "FE-2045",
+      "fecha": "2026-03-02",
+      "fecha_vencimiento": "2026-04-02",
+      "proveedor": "AMAZON WEB SERVICES COLOMBIA S.A.S.",
+      "nit_tercero": "901344550",
+      "telefono": "+57 (601) 7450000",
+      "ciudad": "Bogotá D.C.",
+      "departamento": "Bogotá",
+      "correo": "billing@aws-latam.com",
+      "descripcion_item": "Servicios de Nube e Infraestructura Cloud Hosting Marzo 2026",
+      "cantidad": 1,
+      "valor_unitario": 4850000,
+      "subtotal": 4850000,
+      "iva": 921500,
+      "total": 5771500,
+      "casilla_350": 62,
+      "retencion_porc": 4,
+      "retencion_valor": 194000,
+      "reteica_tarifa": 9.66,
+      "reteiva_porc": 15,
+      "forma_pago": "Crédito",
+      "medio_pago": "47 - Transferencia Bancaria",
+      "cuenta_gasto": "513515",
+      "tipo_comprobante": "COMPRAS",
+      "cufe_hash": "3b08e24483a912bb0e4b8ef9910d93ac76bb1a02931a78cc8283a09a1a2b",
+      "estado_revision": "AUDITADA",
+      "fecha_cargue": "2026-03-02T10:15:00Z"
+    },
+    {
+      "id_factura": 2,
+      "id_empresa": 1,
+      "factura_num": "F-9812",
+      "fecha": "2026-03-05",
+      "fecha_vencimiento": "2026-03-05",
+      "proveedor": "PAPELES Y SUMINISTROS DE COLOMBIA LTDA",
+      "nit_tercero": "860002133",
+      "telefono": "+57 (604) 3129900",
+      "ciudad": "Medellín",
+      "departamento": "Antioquia",
+      "correo": "facturacion@suministroscol.com",
+      "descripcion_item": "Resmas de papel bond, tóner para impresoras láser y suministros oficina",
+      "cantidad": 12,
+      "valor_unitario": 145000,
+      "subtotal": 1740000,
+      "iva": 330600,
+      "total": 2070600,
+      "casilla_350": 64,
+      "retencion_porc": 2.5,
+      "retencion_valor": 43500,
+      "reteica_tarifa": 4.14,
+      "reteiva_porc": 0,
+      "forma_pago": "Contado",
+      "medio_pago": "10 - Efectivo",
+      "cuenta_gasto": "51953001",
+      "tipo_comprobante": "COMPRAS",
+      "cufe_hash": "9aa47e11f8b3c41a54db0910f8ca73151b88e10c74ba417bc01fa87629b3",
+      "estado_revision": "PENDIENTE",
+      "fecha_cargue": "2026-03-05T14:22:00Z"
+    },
+    {
+      "id_factura": 3,
+      "id_empresa": 1,
+      "factura_num": "HN-108",
+      "fecha": "2026-03-10",
+      "fecha_vencimiento": "2026-03-25",
+      "proveedor": "DR. GUILLERMO VALENCIA ASESORES TRIBUTARIOS S.A.S.",
+      "nit_tercero": "900543211",
+      "telefono": "+57 (601) 4893322",
+      "ciudad": "Bogotá D.C.",
+      "departamento": "Cundinamarca",
+      "correo": "valencia.tributaria@legalval.com",
+      "descripcion_item": "Asesoría y estructuración en cierre fiscal anual y planeación DIAN 2026",
+      "cantidad": 1,
+      "valor_unitario": 6500000,
+      "subtotal": 6500000,
+      "iva": 1235000,
+      "total": 7735000,
+      "casilla_350": 61,
+      "retencion_porc": 10,
+      "retencion_valor": 650000,
+      "reteica_tarifa": 9.66,
+      "reteiva_porc": 15,
+      "forma_pago": "Crédito",
+      "medio_pago": "47 - Transferencia Bancaria",
+      "cuenta_gasto": "511010",
+      "tipo_comprobante": "COMPRAS",
+      "cufe_hash": "f41a87bc9910d54a2b9187ec0029341ba9e745cc91010db910fa78129cc1",
+      "estado_revision": "AUDITADA",
+      "fecha_cargue": "2026-03-10T09:00:00Z"
+    },
+    {
+      "id_factura": 4,
+      "id_empresa": 1,
+      "factura_num": "ARR-045",
+      "fecha": "2026-03-12",
+      "fecha_vencimiento": "2026-03-15",
+      "proveedor": "INMOBILIARIA DEL COUNTRY S.A.",
+      "nit_tercero": "890900123",
+      "telefono": "+57 (601) 6205500",
+      "ciudad": "Bogotá D.C.",
+      "departamento": "Bogotá",
+      "correo": "arriendos@inmobcountry.co",
+      "descripcion_item": "Canon de arrendamiento oficina corporativa piso 8 mes de Marzo 2026",
+      "cantidad": 1,
+      "valor_unitario": 5200000,
+      "subtotal": 5200000,
+      "iva": 988000,
+      "total": 6188000,
+      "casilla_350": 63,
+      "retencion_porc": 3.5,
+      "retencion_valor": 182000,
+      "reteica_tarifa": 9.66,
+      "reteiva_porc": 0,
+      "forma_pago": "Contado",
+      "medio_pago": "47 - Transferencia Bancaria",
+      "cuenta_gasto": "512010",
+      "tipo_comprobante": "COMPRAS",
+      "cufe_hash": "11a9f0293cb8401ee78120cc948512dd4a0918efbc77124ba18092cd9910",
+      "estado_revision": "SINCRONIZADA_SIIGO",
+      "siigo_id": "SG-PUR-88210",
+      "fecha_cargue": "2026-03-12T16:45:00Z"
+    },
+    {
+      "id_factura": 5,
+      "id_empresa": 1,
+      "factura_num": "MTO-502",
+      "fecha": "2026-03-18",
+      "fecha_vencimiento": "2026-03-20",
+      "proveedor": "SISTEMAS Y REDES INTEGRALES SAS",
+      "nit_tercero": "900654987",
+      "telefono": "+57 (601) 5554321",
+      "ciudad": "Bogotá D.C.",
+      "departamento": "Bogotá",
+      "correo": "soporte@sistemasredes.co",
+      "descripcion_item": "Mantenimiento preventivo servidores rack y cableado estructurado categoría 6A",
+      "cantidad": 1,
+      "valor_unitario": 1250000,
+      "subtotal": 1250000,
+      "iva": 237500,
+      "total": 1487500,
+      "casilla_350": 62,
+      "retencion_porc": 4,
+      "retencion_valor": 50000,
+      "reteica_tarifa": 9.66,
+      "reteiva_porc": 0,
+      "forma_pago": "Contado",
+      "medio_pago": "47 - Transferencia Bancaria",
+      "cuenta_gasto": "513505",
+      "tipo_comprobante": "COMPRAS",
+      "cufe_hash": "22ef871b99a03c5188d0112fa7bca9084129e8401928bcad908127361a9f",
+      "estado_revision": "PENDIENTE",
+      "fecha_cargue": "2026-03-18T11:10:00Z"
+    }
+  ],
+  "cuentasPUC": [
+    {
+      "id_puc": 1,
+      "id_empresa": 1,
+      "cuenta": "110505",
+      "nombre": "Caja General"
+    },
+    {
+      "id_puc": 2,
+      "id_empresa": 1,
+      "cuenta": "11100501",
+      "nombre": "Bancolombia Cta Cte 1023"
+    },
+    {
+      "id_puc": 3,
+      "id_empresa": 1,
+      "cuenta": "11100502",
+      "nombre": "Banco Davivienda Cta Ahorros 4401"
+    },
+    {
+      "id_puc": 4,
+      "id_empresa": 1,
+      "cuenta": "11100503",
+      "nombre": "BBVA Colombia Operativa"
+    },
+    {
+      "id_puc": 5,
+      "id_empresa": 1,
+      "cuenta": "13050501",
+      "nombre": "Clientes Nacionales Comerciales"
+    },
+    {
+      "id_puc": 6,
+      "id_empresa": 1,
+      "cuenta": "22050501",
+      "nombre": "Proveedores Nacionales"
+    },
+    {
+      "id_puc": 7,
+      "id_empresa": 1,
+      "cuenta": "233525",
+      "nombre": "Honorarios por Pagar"
+    },
+    {
+      "id_puc": 8,
+      "id_empresa": 1,
+      "cuenta": "233595",
+      "nombre": "Otros Costos y Gastos por Pagar"
+    },
+    {
+      "id_puc": 9,
+      "id_empresa": 1,
+      "cuenta": "236515",
+      "nombre": "Retención en la Fuente - Honorarios (10% - 11%)"
+    },
+    {
+      "id_puc": 10,
+      "id_empresa": 1,
+      "cuenta": "236525",
+      "nombre": "Retención en la Fuente - Servicios (4%)"
+    },
+    {
+      "id_puc": 11,
+      "id_empresa": 1,
+      "cuenta": "236540",
+      "nombre": "Retención en la Fuente - Compras (2.5%)"
+    },
+    {
+      "id_puc": 12,
+      "id_empresa": 1,
+      "cuenta": "236701",
+      "nombre": "Impuesto a las Ventas Retenido (ReteIVA 15%)"
+    },
+    {
+      "id_puc": 13,
+      "id_empresa": 1,
+      "cuenta": "236801",
+      "nombre": "Impuesto de Industria y Comercio Retenido (ReteICA)"
+    },
+    {
+      "id_puc": 14,
+      "id_empresa": 1,
+      "cuenta": "510506",
+      "nombre": "Sueldos y Salarios Personal"
+    },
+    {
+      "id_puc": 15,
+      "id_empresa": 1,
+      "cuenta": "511010",
+      "nombre": "Honorarios Asesoría Tributaria y Legal"
+    },
+    {
+      "id_puc": 16,
+      "id_empresa": 1,
+      "cuenta": "512010",
+      "nombre": "Arrendamientos Inmuebles Administrativos"
+    },
+    {
+      "id_puc": 17,
+      "id_empresa": 1,
+      "cuenta": "513505",
+      "nombre": "Servicios de Mantenimiento y Soporte TI"
+    },
+    {
+      "id_puc": 18,
+      "id_empresa": 1,
+      "cuenta": "513515",
+      "nombre": "Servicios de Telecomunicaciones y Cloud"
+    },
+    {
+      "id_puc": 19,
+      "id_empresa": 1,
+      "cuenta": "51953001",
+      "nombre": "Gastos Diversos y Papelería General"
+    }
+  ],
+  "balanceTerceros": [
+    {
+      "id_balance": 1,
+      "id_empresa": 1,
+      "cuenta_contable": "22050501",
+      "nombre_cuenta": "Proveedores Nacionales",
+      "nit_tercero": "901344550",
+      "nombre_tercero": "AMAZON WEB SERVICES COLOMBIA S.A.S.",
+      "saldo_inicial": 0,
+      "debitos": 5577500,
+      "creditos": 5577500,
+      "saldo_final": 0
+    },
+    {
+      "id_balance": 2,
+      "id_empresa": 1,
+      "cuenta_contable": "22050501",
+      "nombre_cuenta": "Proveedores Nacionales",
+      "nit_tercero": "900543211",
+      "nombre_tercero": "DR. GUILLERMO VALENCIA ASESORES TRIBUTARIOS S.A.S.",
+      "saldo_inicial": 0,
+      "debitos": 0,
+      "creditos": 7085000,
+      "saldo_final": 7085000
+    },
+    {
+      "id_balance": 3,
+      "id_empresa": 1,
+      "cuenta_contable": "13050501",
+      "nombre_cuenta": "Clientes Nacionales",
+      "nit_tercero": "800192345",
+      "nombre_tercero": "DISTRIBUIDORA AGROINDUSTRIAL DEL VALLE",
+      "saldo_inicial": 18500000,
+      "debitos": 12000000,
+      "creditos": 14200000,
+      "saldo_final": 16300000
+    }
+  ],
+  "movimientosBanco": [
+    {
+      "id": "BNK-001",
+      "fecha": "2026-03-02",
+      "concepto": "TRANSF AWS CLOUD SERVICIOS FACT 2045",
+      "monto": 5577500,
+      "tipo": "DEBITO",
+      "conciliado": true,
+      "match_id": "LIB-001"
+    },
+    {
+      "id": "BNK-002",
+      "fecha": "2026-03-05",
+      "concepto": "PAGO SUMINISTROS OFICINA COMPRA F-9812",
+      "monto": 2027100,
+      "tipo": "DEBITO",
+      "conciliado": true,
+      "match_id": "LIB-002"
+    },
+    {
+      "id": "BNK-003",
+      "fecha": "2026-03-12",
+      "concepto": "TRANSFERENCIA ARRIENDO PISO 8 INMOB COUNTRY",
+      "monto": 6006000,
+      "tipo": "DEBITO",
+      "conciliado": true,
+      "match_id": "LIB-004"
+    },
+    {
+      "id": "BNK-004",
+      "fecha": "2026-03-15",
+      "concepto": "COMISION BANCARIA MANEJO CUENTA PYME",
+      "monto": 45000,
+      "tipo": "DEBITO",
+      "conciliado": false
+    },
+    {
+      "id": "BNK-005",
+      "fecha": "2026-03-20",
+      "concepto": "GRAVAMEN MOVIMIENTOS FINANCIEROS 4X1000",
+      "monto": 54620,
+      "tipo": "DEBITO",
+      "conciliado": false
+    },
+    {
+      "id": "BNK-006",
+      "fecha": "2026-03-22",
+      "concepto": "TRANSFERENCIA CLIENTE ANDINO ABONO FACT 110",
+      "monto": 14200000,
+      "tipo": "CREDITO",
+      "conciliado": false
+    }
+  ],
+  "movimientosLibro": [
+    {
+      "id": "LIB-001",
+      "fecha": "2026-03-02",
+      "concepto": "Pago Factura FE-2045 AWS Latam",
+      "monto": 5577500,
+      "tipo": "DEBITO",
+      "cuenta": "11100502",
+      "tercero": "901344550",
+      "conciliado": true,
+      "match_id": "BNK-001"
+    },
+    {
+      "id": "LIB-002",
+      "fecha": "2026-03-05",
+      "concepto": "Egreso Pago Papeles y Suministros F-9812",
+      "monto": 2027100,
+      "tipo": "DEBITO",
+      "cuenta": "11100502",
+      "tercero": "860002133",
+      "conciliado": true,
+      "match_id": "BNK-002"
+    },
+    {
+      "id": "LIB-003",
+      "fecha": "2026-03-10",
+      "concepto": "Pago Honorarios Dr. Guillermo Valencia HN-108",
+      "monto": 7085000,
+      "tipo": "DEBITO",
+      "cuenta": "11100502",
+      "tercero": "900543211",
+      "conciliado": false
+    },
+    {
+      "id": "LIB-004",
+      "fecha": "2026-03-12",
+      "concepto": "Pago Canon Inmobiliaria Country ARR-045",
+      "monto": 6006000,
+      "tipo": "DEBITO",
+      "cuenta": "11100502",
+      "tercero": "890900123",
+      "conciliado": true,
+      "match_id": "BNK-003"
+    },
+    {
+      "id": "LIB-005",
+      "fecha": "2026-03-18",
+      "concepto": "Cheque girado mantenimiento Sistemas y Redes",
+      "monto": 1437500,
+      "tipo": "DEBITO",
+      "cuenta": "11100502",
+      "tercero": "900654987",
+      "conciliado": false
+    }
+  ],
+  "modificaciones": [
+    {
+      "id": "mod-1791559570606-221",
+      "timestamp": "2026-10-09T15:26:10.606Z",
+      "autor_id": 7,
+      "autor_nombre": "Juan David Ramírez",
+      "autor_email": "juan.ramirez@tlm.net.co",
+      "autor_rol": "Analista",
+      "tipo_accion": "CONFIG_UPDATE",
+      "descripcion": "Actualización de contraseña segura alfanumérica para Juan David Ramírez",
+      "detalles": "Estándar de seguridad de 8+ caracteres alfanuméricos aplicado. Estado: Sin contraseña provisional pendiente.",
+      "version_destino": "v2.0",
+      "repositorio": "Repositorio Central de Juan Yaya",
+      "hash_commit": "v2-256250a"
+    },
+    {
+      "id": "mod-1791559570570-543",
+      "timestamp": "2026-10-09T15:26:10.570Z",
+      "autor_id": 1,
+      "autor_nombre": "Juan Yaya - Administrador Maestro",
+      "autor_email": "automatizaciones@tlm.net.co",
+      "autor_rol": "Administrador",
+      "tipo_accion": "COLABORACION",
+      "descripcion": "Creación de usuario Juan David Ramírez (Analista) con contraseña provisional asignada por Juan",
+      "detalles": "Cuenta activada con requisito forzado de cambio de clave al primer ingreso. Notificación enviada a juan.ramirez@tlm.net.co.",
+      "version_destino": "v2.0",
+      "repositorio": "Repositorio Central de Juan Yaya",
+      "hash_commit": "v2-559e86c"
+    },
+    {
+      "id": "mod-1791558074027-772",
+      "timestamp": "2026-10-09T15:01:14.027Z",
+      "autor_id": 1,
+      "autor_nombre": "Juan Yaya",
+      "autor_email": "automatizaciones@tlm.net.co",
+      "autor_rol": "Administrador",
+      "tipo_accion": "GCP_SYNC",
+      "descripcion": "Sincronización y despliegue del Repositorio v2.0 a Google Cloud Platform (gcp-gwr9pnm)",
+      "detalles": "Snapshot atómico de base de datos y esquemas contables replicado en infraestructura Google Cloud Run.",
+      "version_destino": "v2.0",
+      "repositorio": "Repositorio Central de Juan Yaya",
+      "hash_commit": "v2-f24899f"
+    },
+    {
+      "id": "mod-v2-004",
+      "timestamp": "2026-10-08T16:15:00.000Z",
+      "autor_id": 1,
+      "autor_nombre": "Juan Yaya - Administrador Maestro",
+      "autor_email": "automatizaciones@tlm.net.co",
+      "autor_rol": "Administrador",
+      "tipo_accion": "RELEASE_V2",
+      "descripcion": "Consolidación oficial de release: Versión 2.0 emitida en Repositorio Central",
+      "detalles": "Fusión de modificaciones de David Morales y Valentina Castro en rama principal master v2.0",
+      "version_destino": "v2.0",
+      "repositorio": "Repositorio Maestro de Juan Yaya",
+      "hash_commit": "v2-8fa3c01"
+    },
+    {
+      "id": "mod-v2-003",
+      "timestamp": "2026-10-08T15:58:30.000Z",
+      "autor_id": 6,
+      "autor_nombre": "Valentina Castro Rincón (Gestora de Operaciones & UBL)",
+      "autor_email": "valentina.castro@tlm.net.co",
+      "autor_rol": "Analista",
+      "tipo_accion": "FACTURA_AUDITADA",
+      "descripcion": "Auditoría UBL de comprobante FE-2045 y verificación de retenciones 4% DIAN",
+      "detalles": "Aprobada para conciliación bancaria y casillas 62/83 del formulario F350",
+      "version_destino": "v2.0",
+      "repositorio": "Repositorio Maestro de Juan Yaya",
+      "hash_commit": "v2-4ce81b2"
+    },
+    {
+      "id": "mod-v2-002",
+      "timestamp": "2026-10-08T15:35:10.000Z",
+      "autor_id": 5,
+      "autor_nombre": "Andrés Felipe Morales (Especialista Tributario)",
+      "autor_email": "andres.morales@tlm.net.co",
+      "autor_rol": "Contador",
+      "tipo_accion": "CONCILIACION",
+      "descripcion": "Cruce automático de extracto Bancolombia con tolerancia de 0.00 COP",
+      "detalles": "Emparejadas 3 partidas mayores y generado comprobante de ajuste Siigo",
+      "version_destino": "v2.0",
+      "repositorio": "Repositorio Maestro de Juan Yaya",
+      "hash_commit": "v2-1df95e4"
+    },
+    {
+      "id": "mod-v2-001",
+      "timestamp": "2026-10-08T14:40:00.000Z",
+      "autor_id": 5,
+      "autor_nombre": "Andrés Felipe Morales (Especialista Tributario)",
+      "autor_email": "andres.morales@tlm.net.co",
+      "autor_rol": "Contador",
+      "tipo_accion": "PUC_UPDATE",
+      "descripcion": "Actualización de mapeo de retenciones en cuentas 236525 y 236801",
+      "detalles": "Sincronizado con centros de costo de TLM Consulting y régimen común",
+      "version_destino": "v2.0",
+      "repositorio": "Repositorio Maestro de Juan Yaya",
+      "hash_commit": "v2-9ab22c7"
+    }
+  ],
+  "notificacionesSeguridad": [
+    {
+      "id": "sec-1791559570620-14",
+      "destinatario": "juan.ramirez@tlm.net.co",
+      "asunto": "Contraseña Recuperada y Restablecida con Éxito - TLM",
+      "fecha": "2026-10-09T15:26:10.620Z",
+      "tipo": "PASSWORD_CAMBIADA",
+      "mensaje": "Hola Juan David Ramírez, tu contraseña corporativa ha sido restablecida exitosamente mediante código de seguridad OTP. Ahora puedes ingresar normalmente con tus nuevas credenciales.",
+      "estado": "ENVIADO"
+    },
+    {
+      "id": "sec-1791559570613-988",
+      "destinatario": "juan.ramirez@tlm.net.co",
+      "asunto": "Código de Seguridad [161328] para Recuperación de Contraseña - TLM",
+      "fecha": "2026-10-09T15:26:10.613Z",
+      "tipo": "CODIGO_RECUPERACION",
+      "codigo_otp": "161328",
+      "mensaje": "Hola Juan David Ramírez, has solicitado restablecer tu contraseña en la Consola TLM. Tu código de seguridad confidencial es: [161328]. Este código expira en 15 minutos. Si tú no realizaste esta solicitud, comunícate de inmediato con Juan Yaya (automatizaciones@tlm.net.co).",
+      "estado": "ENVIADO"
+    },
+    {
+      "id": "sec-1791559570605-982",
+      "destinatario": "juan.ramirez@tlm.net.co",
+      "asunto": "Confirmación de Cambio de Contraseña - Consola TLM",
+      "fecha": "2026-10-09T15:26:10.605Z",
+      "tipo": "PASSWORD_CAMBIADA",
+      "mensaje": "Hola Juan David Ramírez, tu contraseña corporativa ha sido actualizada exitosamente y cumple con el estándar alfanumérico seguro. Tu cuenta se encuentra protegida.",
+      "estado": "ENVIADO"
+    },
+    {
+      "id": "sec-1791559570569-650",
+      "destinatario": "juan.ramirez@tlm.net.co",
+      "asunto": "Credenciales de Acceso a Consola TLM - Contraseña Provisional",
+      "fecha": "2026-10-09T15:26:10.569Z",
+      "tipo": "NUEVO_USUARIO",
+      "mensaje": "Estimado/a Juan David Ramírez, Juan Yaya (Administrador Maestro) ha habilitado tu acceso a la Consola TLM Enterprise. Tu contraseña provisional es: \"JuanTemporal2026!\". IMPORTANTE: Al iniciar sesión por primera vez, el sistema te solicitará obligatoriamente cambiarla por una contraseña alfanumérica personal de mínimo 8 caracteres.",
+      "estado": "ENVIADO"
+    },
+    {
+      "id": "sec-seed-1",
+      "destinatario": "andres.morales@tlm.net.co",
+      "asunto": "Credenciales de Acceso a Consola TLM - Contraseña Provisional Asignada por Juan",
+      "fecha": "2026-10-09T13:25:57.386Z",
+      "tipo": "NUEVO_USUARIO",
+      "mensaje": "Estimado/a Andrés Felipe Morales, Juan Yaya (Administrador Maestro) ha habilitado tu acceso a la Consola TLM Enterprise con contraseña provisional. Se requerirá cambio obligatorio alfanumérico al primer inicio.",
+      "estado": "ENVIADO"
+    },
+    {
+      "id": "sec-seed-2",
+      "destinatario": "automatizaciones@tlm.net.co",
+      "asunto": "Código de Seguridad [748291] para Recuperación de Contraseña - TLM",
+      "fecha": "2026-10-09T14:25:57.386Z",
+      "tipo": "CODIGO_RECUPERACION",
+      "codigo_otp": "748291",
+      "mensaje": "Hola Juan Yaya, has solicitado recuperar tu contraseña corporativa. Tu código de seguridad confidencial es: [748291]. Válido por 15 minutos.",
+      "estado": "ENVIADO"
+    }
+  ]
+}

@@ -1,0 +1,195 @@
+export interface PermisosUsuario {
+  administrador: boolean;
+  auditoria_ubl: boolean;
+  impuestos_f350: boolean;
+  conciliacion_bancaria: boolean;
+  transmitir_siigo: boolean;
+  gestion_usuarios: boolean;
+}
+
+export interface NotificacionSeguridad {
+  id: string;
+  destinatario: string;
+  asunto: string;
+  fecha: string;
+  tipo: 'NUEVO_USUARIO' | 'RESET_ADMIN' | 'CODIGO_RECUPERACION' | 'PASSWORD_CAMBIADA';
+  codigo_otp?: string;
+  mensaje: string;
+  estado: 'ENVIADO';
+}
+
+export interface Usuario {
+  id_usuario: number;
+  nombre_completo: string;
+  email: string;
+  hashed_password?: string;
+  rol: 'Administrador' | 'Contador' | 'Analista' | 'Auditor';
+  activo: boolean;
+  empresas_ids: number[];
+  permisos: PermisosUsuario;
+  avatar_url?: string | null;
+  requiere_cambio_password?: boolean;
+  codigo_recuperacion?: string | null;
+  codigo_recuperacion_expira?: string | null;
+  ultimo_cambio_password?: string;
+}
+
+export interface Empresa {
+  id_empresa: number;
+  nombre_comercial: string;
+  nit: string;
+  software_erp: string;
+  software_destino: string;
+  logo_url?: string;
+  siigo_username?: string;
+  siigo_access_key?: string;
+  siigo_document_id?: number;
+}
+
+export interface FacturaItem {
+  id?: string;
+  descripcion_item: string;
+  cantidad: number;
+  valor_unitario: number;
+  subtotal: number;
+  iva: number;
+  cuenta_gasto: string;
+  casilla_350: number;
+  retencion_porc: number;
+  retencion_valor: number;
+  reteica_tarifa: number;
+  reteiva_porc: number;
+}
+
+export interface Factura {
+  id_factura: number;
+  id_empresa: number;
+  factura_num: string;
+  fecha: string;
+  fecha_vencimiento?: string;
+  proveedor: string;
+  nit_tercero: string;
+  telefono?: string;
+  direccion?: string;
+  ciudad?: string;
+  departamento?: string;
+  correo?: string;
+  responsabilidad_fiscal?: string;
+  descripcion_item: string;
+  cantidad: number;
+  valor_unitario: number;
+  subtotal: number;
+  iva: number;
+  total?: number;
+  retencion_porc: number;
+  retencion_valor: number;
+  reteica_tarifa?: number;
+  reteiva_porc?: number;
+  casilla_350: number;
+  forma_pago: string;
+  medio_pago: string;
+  cuenta_gasto: string;
+  tipo_comprobante: string;
+  cufe_hash: string;
+  estado_revision: 'PENDIENTE' | 'AUDITADA' | 'RECHAZADA' | 'SINCRONIZADA_SIIGO';
+  pdf_b64?: string;
+  fecha_cargue: string;
+  id_medio_pago?: number;
+  id_retencion?: number;
+  id_reteica?: number;
+  id_reteiva?: number;
+  siigo_id?: string;
+  items?: FacturaItem[];
+}
+
+export interface CuentaPUC {
+  id_puc: number;
+  id_empresa: number;
+  cuenta: string;
+  nombre: string;
+  naturaleza?: 'DEBITO' | 'CREDITO';
+}
+
+export interface BalanceTercero {
+  id_balance: number;
+  id_empresa: number;
+  cuenta_contable: string;
+  nombre_cuenta: string;
+  nit_tercero: string;
+  nombre_tercero: string;
+  saldo_inicial: number;
+  debitos: number;
+  creditos: number;
+  saldo_final: number;
+}
+
+export interface MovimientoBancario {
+  id: string;
+  fecha: string;
+  concepto: string;
+  monto: number;
+  tipo: 'DEBITO' | 'CREDITO';
+  saldo?: number;
+  referencia?: string;
+  conciliado: boolean;
+  match_id?: string;
+}
+
+export interface MovimientoLibro {
+  id: string;
+  fecha: string;
+  concepto: string;
+  monto: number;
+  tipo: 'DEBITO' | 'CREDITO';
+  cuenta: string;
+  tercero?: string;
+  conciliado: boolean;
+  match_id?: string;
+}
+
+export interface CruceConciliacion {
+  id_cruce: string;
+  banco: MovimientoBancario;
+  libro: MovimientoLibro;
+  diferencia: number;
+  puntaje_coincidencia: number;
+  metodo_match: 'EXACTO' | 'TOLERANCIA_VALOR' | 'APROX_FECHA_VALOR';
+}
+
+export interface F350Casilla {
+  casilla: number;
+  concepto: string;
+  base_gravable: number;
+  tarifa_sugerida: number;
+  retencion_calculada: number;
+  cantidad_facturas: number;
+  facturas_asociadas: string[];
+}
+
+export interface ModificacionRepositorio {
+  id: string;
+  timestamp: string;
+  autor_id: number;
+  autor_nombre: string;
+  autor_email: string;
+  autor_rol: string;
+  tipo_accion: 'FACTURA_UPDATE' | 'FACTURA_AUDITADA' | 'CONCILIACION' | 'PUC_UPDATE' | 'CONFIG_UPDATE' | 'COLABORACION' | 'RELEASE_V2' | 'GCP_SYNC';
+  descripcion: string;
+  detalles?: string;
+  version_destino: string; // "v2.0"
+  repositorio: string; // "Repositorio Maestro de Juan Yaya"
+  hash_commit: string;
+}
+
+export interface RepositorioInfo {
+  nombre: string;
+  propietario: string;
+  email_propietario: string;
+  version_actual: string;
+  tag: string;
+  descripcion: string;
+  canal_sincronizacion: string;
+  colaboradores_conectados: number;
+  total_modificaciones: number;
+  ultima_actualizacion: string;
+}

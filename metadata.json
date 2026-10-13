@@ -1,0 +1,6 @@
+{
+  "name": "Consola TLM - Enterprise Fiscal & ERP Engine",
+  "description": "Plataforma escalable de gestión fiscal B2B, auditoría contable UBL 2.1, conciliación bancaria multientidad y sincronización con Siigo Nube.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
