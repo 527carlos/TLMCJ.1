@@ -1,4 +1,4 @@
-import { MovimientoBancario, MovimientoLibro, CruceConciliacion } from '../domain/types.ts';
+import type { MovimientoBancario, MovimientoLibro, CruceConciliacion } from '../domain/types.ts';
 
 export interface ReconciliationSummary {
   totalBanco: number;

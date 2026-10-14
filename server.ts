@@ -3,6 +3,8 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import apiRouter from './src/server/routes/apiRouter.ts';
+import { ExcelService } from './src/server/services/excelService.ts';
+import { db } from './src/server/storage/dataStore.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,6 +17,17 @@ async function startServer() {
   app.use(cors());
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+  // Generar base de datos en formato Excel (.xlsx) maestra al iniciar
+  try {
+    const { filePathPublic } = ExcelService.generarLibroCompleto(db);
+    console.log(`[Consola TLM] Base de datos Excel generada exitosamente en ${filePathPublic}`);
+  } catch (err) {
+    console.warn(`[Consola TLM] Advertencia generando Excel al inicio:`, err);
+  }
+
+  // Servir archivos estáticos de /public (para descarga directa de Excel y recursos)
+  app.use(express.static(path.resolve(__dirname, 'public')));
 
   // API v1 Routers
   app.use('/api/v1', apiRouter);

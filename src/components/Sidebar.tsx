@@ -7,6 +7,7 @@ import {
   BookOpen, 
   Users, 
   Cpu, 
+  Database,
   ChevronLeft, 
   ChevronRight,
   ShieldCheck,
@@ -32,6 +33,7 @@ interface SidebarProps {
   onOpenBrandCustomizer?: () => void;
   currentUser?: Usuario | null;
   onOpenAuthModal?: () => void;
+  primaryColor?: string;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -46,7 +48,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   customLogoUrl = null,
   onOpenBrandCustomizer,
   currentUser = null,
-  onOpenAuthModal
+  onOpenAuthModal,
+  primaryColor = '#271a82'
 }) => {
   const getCleanInitials = (user: Usuario | null): string => {
     if (!user || !user.nombre_completo) return 'JY';
@@ -72,8 +75,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'centro-fiscal', label: 'Centro Fiscal (F350)', icon: FileSpreadsheet },
     { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Scale },
     { id: 'cerebro', label: 'Cerebro Contable PUC', icon: BookOpen },
-    { id: 'accesos', label: 'Gestión & Siigo API', icon: Users },
-    { id: 'arquitectura', label: 'Arquitectura & Escala', icon: Cpu, highlight: true }
+    { id: 'accesos', label: 'Admin Usuarios & Cloud', icon: Users },
+    { id: 'base-datos', label: 'Base de Datos & Cloud', icon: Database, highlight: true },
+    { id: 'arquitectura', label: 'Arquitectura & Escala', icon: Cpu }
   ];
 
   return (
@@ -160,11 +164,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 title={item.label}
                 className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium text-xs sm:text-sm transition-all duration-150 cursor-pointer ${
                   isActive
-                    ? 'bg-gradient-to-r from-[#271a82] to-[#4059aa] text-white shadow-lg border-l-4 border-[#e64519] font-bold'
+                    ? 'text-white shadow-lg border-l-4 border-[#e64519] font-bold'
                     : item.highlight
                     ? 'bg-indigo-950/60 text-indigo-200 hover:bg-[#271a82]/50 hover:text-white border border-indigo-800/40'
                     : 'text-indigo-200 hover:bg-[#271a82]/40 hover:text-white'
                 }`}
+                style={isActive ? { background: `linear-gradient(135deg, ${primaryColor}, #4059aa)` } : undefined}
               >
                 <div className="flex items-center gap-3">
                   <Icon className={`w-5 h-5 flex-shrink-0 ${isActive ? 'text-[#fa9d1c]' : item.highlight ? 'text-[#e64519]' : 'text-indigo-300'}`} />

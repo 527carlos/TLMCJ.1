@@ -24,10 +24,31 @@ export interface NotificacionSeguridad {
   destinatario: string;
   asunto: string;
   fecha: string;
-  tipo: 'NUEVO_USUARIO' | 'RESET_ADMIN' | 'CODIGO_RECUPERACION' | 'PASSWORD_CAMBIADA';
+  tipo: 'NUEVO_USUARIO' | 'RESET_ADMIN' | 'CODIGO_RECUPERACION' | 'PASSWORD_CAMBIADA' | 'ACCESO_CODIGO_DESARROLLADOR';
   codigo_otp?: string;
   mensaje: string;
   estado: 'ENVIADO';
+}
+
+export interface PermisosCodigo {
+  editar_codigo: boolean;
+  hacer_commits_git: boolean;
+  desplegar_cloud_run: boolean;
+  acceso_google_drive: boolean;
+  gestionar_apis_dian: boolean;
+}
+
+export interface DesarrolladorAcceso {
+  id: string;
+  email: string;
+  nombre: string;
+  rol_tecnico: 'Full-Stack Developer' | 'Frontend Engineer' | 'Backend Engineer' | 'DevOps & Cloud Engineer' | 'Auditor de Código';
+  estado: 'ACTIVO' | 'INVITADO' | 'REVOCADO';
+  token_desarrollador: string;
+  permisos_codigo: PermisosCodigo;
+  fecha_invitacion: string;
+  ultimo_acceso?: string;
+  invitado_por: string;
 }
 
 export interface Usuario {
@@ -188,4 +209,45 @@ export interface RepositorioInfo {
   colaboradores_conectados: number;
   total_modificaciones: number;
   ultima_actualizacion: string;
+}
+
+export interface GoogleDriveFile {
+  id: string;
+  nombre: string;
+  tipo: 'xml' | 'json' | 'csv' | 'pdf' | 'xlsx' | 'folder';
+  tamano_bytes: number;
+  tamano_legible: string;
+  ultima_modificacion: string;
+  sincronizado: boolean;
+  drive_url: string;
+  categoria: 'FACTURAS_XML' | 'EXTRACTOS' | 'BACKUPS_BD' | 'REPORTES_F350' | 'PLANOS_SIIGO' | 'EXCEL_BD';
+}
+
+export interface GoogleDriveConfig {
+  cuenta_propietario: string;
+  carpeta_id: string;
+  carpeta_nombre: string;
+  carpeta_url: string;
+  modo_sincronizacion: 'AUTOMATICA_TIEMPO_REAL' | 'MANUAL';
+  ultima_sincronizacion: string;
+  hash_ultimo_sync: string;
+}
+
+export interface GoogleDriveStatus {
+  conectado: boolean;
+  cuenta_propietario: string;
+  carpeta_id: string;
+  carpeta_nombre: string;
+  carpeta_url: string;
+  espacio_usado_gb: number;
+  espacio_total_gb: number;
+  porcentaje_usado: number;
+  total_archivos: number;
+  archivos_xml_ubl: number;
+  backups_json: number;
+  ultima_sincronizacion: string;
+  hash_ultimo_sync: string;
+  archivos: GoogleDriveFile[];
+  modo_sincronizacion: 'AUTOMATICA_TIEMPO_REAL' | 'MANUAL';
+  estado: 'ACTIVO_Y_SINCRONIZADO' | 'SINCRONIZANDO' | 'ERROR';
 }

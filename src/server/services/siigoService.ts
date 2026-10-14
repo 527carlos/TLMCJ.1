@@ -1,4 +1,4 @@
-import { Factura } from '../domain/types.ts';
+import type { Factura } from '../domain/types.ts';
 
 export interface SiigoSyncResponse {
   status: 'success' | 'error';

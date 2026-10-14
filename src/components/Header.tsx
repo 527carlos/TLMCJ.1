@@ -1,6 +1,6 @@
 import React from 'react';
 import { Empresa, Usuario } from '../types/index.ts';
-import { Building2, UserCheck, RefreshCw, Zap, Palette, ShieldCheck, GitBranch } from 'lucide-react';
+import { Building2, UserCheck, RefreshCw, Palette, GitBranch } from 'lucide-react';
 
 interface HeaderProps {
   currentSection: string;
@@ -11,6 +11,7 @@ interface HeaderProps {
   onOpenBrandCustomizer?: () => void;
   onOpenAuthModal?: () => void;
   onNavigateToSection?: (sec: string) => void;
+  primaryColor?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -21,7 +22,8 @@ export const Header: React.FC<HeaderProps> = ({
   isRefreshing = false,
   onOpenBrandCustomizer,
   onOpenAuthModal,
-  onNavigateToSection
+  onNavigateToSection,
+  primaryColor = '#271a82'
 }) => {
   const getCleanInitials = (user: Usuario | null): string => {
     if (!user || !user.nombre_completo) return 'JY';
@@ -50,6 +52,8 @@ export const Header: React.FC<HeaderProps> = ({
         return { title: 'Cerebro Contable (PUC & Balance)', subtitle: 'Explorador jerárquico de cuentas y balance de prueba por terceros' };
       case 'accesos':
         return { title: 'Gestión, Repositorio & Siigo API', subtitle: 'Repositorio Juan v2.0, gobierno de usuarios y credenciales ERP' };
+      case 'base-datos':
+        return { title: 'Base de Datos Central & Hub de Migración Cloud', subtitle: 'Persistencia en línea, tablas relacionales, esquemas SQL y replicación en Google Cloud' };
       case 'arquitectura':
         return { title: 'Arquitectura & Centro de Escalabilidad', subtitle: 'Diseño modular Clean Architecture para alto rendimiento empresarial' };
       default:
@@ -57,21 +61,12 @@ export const Header: React.FC<HeaderProps> = ({
     }
   };
 
-  const { title, subtitle } = getSectionTitle();
+  const { title } = getSectionTitle();
 
   return (
     <header className="bg-white border-b border-slate-200 px-6 py-3.5 flex items-center justify-between shadow-xs z-20">
       <div>
-        <div className="flex items-center gap-2.5">
-          <h2 className="text-xl font-bold text-[#271a82] tracking-tight">{title}</h2>
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-            <Zap className="w-3 h-3 text-emerald-500" /> Motor Online
-          </span>
-          <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-[#271a82] border border-indigo-200">
-            <ShieldCheck className="w-3 h-3 text-[#fa9d1c]" /> TLM BIC
-          </span>
-        </div>
-        <p className="text-xs text-slate-500 font-medium">{subtitle}</p>
+        <h2 className="text-xl font-bold tracking-tight transition-colors duration-200" style={{ color: primaryColor }}>{title}</h2>
       </div>
 
       <div className="flex items-center gap-3">

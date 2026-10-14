@@ -13,7 +13,8 @@ import {
   CheckSquare, 
   Square,
   ShieldCheck,
-  Building
+  Building,
+  FolderDown
 } from 'lucide-react';
 
 interface FacturasViewProps {
@@ -21,6 +22,7 @@ interface FacturasViewProps {
   cuentasPUC: CuentaPUC[];
   onUploadXml: (files: FileList) => void;
   onSeedDemo: () => void;
+  onImportFromDrive?: () => void;
   onUpdateFactura: (id: number, field: string, value: any) => void;
   onDeleteFactura: (id: number) => void;
   onBulkDelete: (ids: number[]) => void;
@@ -34,6 +36,7 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
   cuentasPUC,
   onUploadXml,
   onSeedDemo,
+  onImportFromDrive,
   onUpdateFactura,
   onDeleteFactura,
   onBulkDelete,
@@ -132,6 +135,25 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
             <Sparkles className="w-4 h-4 text-[#fa9d1c]" />
             Inyectar Facturas Demo
           </button>
+
+          <button
+            onClick={onImportFromDrive}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#0066da] border border-blue-200 font-bold text-xs transition active:scale-95 cursor-pointer shadow-2xs"
+            title="Importar facturas directamente desde la carpeta Google Drive de Juan Yaya"
+          >
+            <FolderDown className="w-4 h-4 text-[#0066da]" />
+            <span>Importar de Google Drive</span>
+          </button>
+
+          <a
+            href="/api/v1/sistema/exportar-excel/facturas"
+            download="tlm_facturas_dian.xlsx"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs transition active:scale-95 cursor-pointer shadow-2xs"
+            title="Exportar todas las facturas en formato Excel (.xlsx)"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            <span>Exportar a Excel (.xlsx)</span>
+          </a>
         </div>
       </div>
 

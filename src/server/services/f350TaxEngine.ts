@@ -1,4 +1,4 @@
-import { Factura, F350Casilla } from '../domain/types.ts';
+import type { Factura, F350Casilla } from '../domain/types.ts';
 
 export interface F350TaxLiquidationResult {
   periodo: string;

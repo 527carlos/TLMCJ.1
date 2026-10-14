@@ -12,6 +12,7 @@ import { CentroFiscalView } from './components/CentroFiscalView.tsx';
 import { ConciliacionView } from './components/ConciliacionView.tsx';
 import { CerebroContableView } from './components/CerebroContableView.tsx';
 import { AccesosView } from './components/AccesosView.tsx';
+import { BaseDatosCloudView } from './components/BaseDatosCloudView.tsx';
 import { ArquitecturaView } from './components/ArquitecturaView.tsx';
 import { CufeModal } from './components/CufeModal.tsx';
 import { SiigoPushModal } from './components/SiigoPushModal.tsx';
@@ -19,31 +20,94 @@ import { BrandCustomizerModal } from './components/BrandCustomizerModal.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
 import { Empresa, Usuario, PermisosUsuario, Factura, CuentaPUC, BalanceTercero, F350Report, ConciliacionSummary } from './types/index.ts';
 
+const defaultAdminUser: Usuario = {
+  id_usuario: 1,
+  nombre_completo: "Juan Yaya - Administrador Maestro",
+  email: "automatizaciones@tlm.net.co",
+  rol: "Administrador",
+  activo: true,
+  empresas_ids: [1, 2, 3],
+  permisos: {
+    administrador: true,
+    auditoria_ubl: true,
+    impuestos_f350: true,
+    conciliacion_bancaria: true,
+    transmitir_siigo: true,
+    gestion_usuarios: true
+  }
+};
+
 export default function App() {
   const [currentSection, setCurrentSection] = useState<string>('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isBrandModalOpen, setIsBrandModalOpen] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [primaryColor, setPrimaryColor] = useState<string>(() => {
+    return localStorage.getItem('tlm_primary_color') || '#271a82';
+  });
   const [customLogoUrl, setCustomLogoUrl] = useState<string | null>(() => {
     return localStorage.getItem('tlm_custom_logo') || null;
   });
 
-  const handleSaveCustomLogo = (url: string | null) => {
+  const [currentUser, setCurrentUser] = useState<Usuario | null>(() => {
+    try {
+      const savedUser = localStorage.getItem('tlm_current_user');
+      if (savedUser) return JSON.parse(savedUser);
+    } catch (e) {}
+    return defaultAdminUser;
+  });
+
+  const handleSelectUser = (u: Usuario | null) => {
+    setCurrentUser(u);
+    if (u) {
+      localStorage.setItem('tlm_current_user_id', u.id_usuario.toString());
+      localStorage.setItem('tlm_current_user', JSON.stringify(u));
+    } else {
+      localStorage.removeItem('tlm_current_user_id');
+      localStorage.removeItem('tlm_current_user');
+    }
+  };
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--tlm-primary', primaryColor);
+  }, [primaryColor]);
+
+  const handleSaveCustomLogo = async (url: string | null, variantTitle?: string, primaryColorHex?: string) => {
     setCustomLogoUrl(url);
+    const newColor = primaryColorHex || primaryColor;
+    if (primaryColorHex) {
+      setPrimaryColor(primaryColorHex);
+      localStorage.setItem('tlm_primary_color', primaryColorHex);
+      document.documentElement.style.setProperty('--tlm-primary', primaryColorHex);
+    }
     if (url) {
       localStorage.setItem('tlm_custom_logo', url);
-      showToast('Logotipo corporativo aplicado con éxito.');
+      showToast(`¡${variantTitle || 'Logotipo corporativo'} y color principal (${newColor}) aplicados con éxito!`);
     } else {
       localStorage.removeItem('tlm_custom_logo');
-      showToast('Identidad oficial TLM restaurada.');
+      showToast(`¡Identidad oficial TLM y color principal (${newColor}) aplicados con éxito!`);
+    }
+
+    try {
+      await fetch('/api/v1/sistema/branding', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customLogoUrl: url,
+          variantTitle,
+          temaAcento: newColor,
+          autor_nombre: currentUser?.nombre_completo || 'Juan Yaya - Administrador Maestro'
+        })
+      });
+    } catch (err) {
+      console.warn('Error sincronizando branding con el servidor:', err);
     }
   };
 
   // Core Data State
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [activeEmpresa, setActiveEmpresa] = useState<Empresa | null>(null);
-  const [currentUser, setCurrentUser] = useState<Usuario | null>(null);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [facturas, setFacturas] = useState<Factura[]>([]);
   const [cuentasPUC, setCuentasPUC] = useState<CuentaPUC[]>([]);
@@ -113,8 +177,13 @@ export default function App() {
       const resUsuarios = await fetch('/api/v1/auth/usuarios');
       const dataUsuarios = await resUsuarios.json();
       setUsuarios(dataUsuarios);
-      if (dataUsuarios.length > 0 && !currentUser) {
-        setCurrentUser(dataUsuarios[0]);
+      if (dataUsuarios.length > 0) {
+        const savedId = localStorage.getItem('tlm_current_user_id');
+        const activeId = savedId ? Number(savedId) : (currentUser?.id_usuario || 1);
+        const match = dataUsuarios.find((u: Usuario) => u.id_usuario === activeId) || dataUsuarios[0];
+        setCurrentUser(match);
+        localStorage.setItem('tlm_current_user_id', match.id_usuario.toString());
+        localStorage.setItem('tlm_current_user', JSON.stringify(match));
       }
 
       // 7. Initial Conciliacion run
@@ -125,6 +194,25 @@ export default function App() {
       });
       const dataConcil = await resConcil.json();
       setConciliacionSummary(dataConcil);
+
+      // 8. Fetch Branding Config & Primary Color
+      try {
+        const resBranding = await fetch('/api/v1/sistema/branding');
+        if (resBranding.ok) {
+          const dataBranding = await resBranding.json();
+          if (dataBranding) {
+            if (dataBranding.customLogoUrl !== undefined && !localStorage.getItem('tlm_custom_logo')) {
+              setCustomLogoUrl(dataBranding.customLogoUrl);
+            }
+            if (dataBranding.temaAcento && !localStorage.getItem('tlm_primary_color')) {
+              setPrimaryColor(dataBranding.temaAcento);
+              document.documentElement.style.setProperty('--tlm-primary', dataBranding.temaAcento);
+            }
+          }
+        }
+      } catch (e) {
+        // Fallback to local storage
+      }
 
     } catch (err) {
       console.error("Error cargando datos de la Consola TLM:", err);
@@ -170,6 +258,22 @@ export default function App() {
       loadData();
     } catch (err) {
       showToast('Error cargando facturas demo.', 'error');
+    }
+  };
+
+  const handleImportFromGoogleDrive = async () => {
+    try {
+      const res = await fetch('/api/v1/sistema/google-drive-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_empresa: activeEmpresa?.id_empresa || 1 })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Error importando desde Google Drive');
+      showToast(data.mensaje || '¡Factura importada exitosamente desde Google Drive!');
+      loadData();
+    } catch (err: any) {
+      showToast(err.message || 'Error importando desde Google Drive.', 'error');
     }
   };
 
@@ -408,6 +512,7 @@ export default function App() {
         onOpenBrandCustomizer={() => setIsBrandModalOpen(true)}
         currentUser={currentUser}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        primaryColor={primaryColor}
       />
 
       {/* Content Area */}
@@ -421,6 +526,7 @@ export default function App() {
           isRefreshing={isRefreshing}
           onOpenBrandCustomizer={() => setIsBrandModalOpen(true)}
           onOpenAuthModal={() => setIsAuthModalOpen(true)}
+          primaryColor={primaryColor}
         />
 
         {/* Banner de Advertencia de Cambio Obligatorio de Contraseña */}
@@ -459,6 +565,7 @@ export default function App() {
               cuentasPUC={cuentasPUC}
               onUploadXml={handleUploadXml}
               onSeedDemo={handleSeedDemo}
+              onImportFromDrive={handleImportFromGoogleDrive}
               onUpdateFactura={handleUpdateFactura}
               onDeleteFactura={handleDeleteFactura}
               onBulkDelete={handleBulkDelete}
@@ -507,6 +614,17 @@ export default function App() {
               onUpdateAvatar={handleUpdateAvatar}
               onRefreshUsers={loadData}
               onShowToast={showToast}
+              onSelectUser={handleSelectUser}
+              primaryColor={primaryColor}
+            />
+          )}
+
+          {currentSection === 'base-datos' && (
+            <BaseDatosCloudView
+              currentUser={currentUser}
+              onNavigateSection={setCurrentSection}
+              onShowToast={showToast}
+              primaryColor={primaryColor}
             />
           )}
 
@@ -542,6 +660,15 @@ export default function App() {
         onClose={() => setIsBrandModalOpen(false)}
         customLogoUrl={customLogoUrl}
         onSaveCustomLogo={handleSaveCustomLogo}
+        primaryColor={primaryColor}
+        currentUser={currentUser}
+        onSwitchToJuan={() => {
+          const juan = usuarios.find(u => u.id_usuario === 1 || u.email === 'automatizaciones@tlm.net.co') || usuarios[0];
+          if (juan) {
+            handleSelectUser(juan);
+            showToast('Sesión cambiada a Juan Yaya (Administrador Maestro).');
+          }
+        }}
       />
 
       {/* Authentication & User Switcher Modal */}
@@ -550,8 +677,8 @@ export default function App() {
         onClose={() => setIsAuthModalOpen(false)}
         currentUser={currentUser}
         usuarios={usuarios}
-        onSelectUser={(u) => setCurrentUser(u)}
-        onLogout={() => setCurrentUser(null)}
+        onSelectUser={handleSelectUser}
+        onLogout={() => handleSelectUser(null)}
         onShowToast={showToast}
         onRefreshUsers={loadData}
         onUpdateAvatar={handleUpdateAvatar}

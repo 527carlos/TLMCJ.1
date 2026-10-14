@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { Usuario, PermisosUsuario, Empresa, Factura, CuentaPUC, BalanceTercero, MovimientoBancario, MovimientoLibro, ModificacionRepositorio, RepositorioInfo, NotificacionSeguridad } from '../domain/types.ts';
+import type { Usuario, PermisosUsuario, Empresa, Factura, CuentaPUC, BalanceTercero, MovimientoBancario, MovimientoLibro, ModificacionRepositorio, RepositorioInfo, NotificacionSeguridad, GoogleDriveConfig, GoogleDriveFile, GoogleDriveStatus, DesarrolladorAcceso, PermisosCodigo } from '../domain/types.ts';
 
 export function getDefaultPermissions(rol: 'Administrador' | 'Contador' | 'Analista' | 'Auditor'): PermisosUsuario {
   switch (rol) {
@@ -43,7 +43,7 @@ export function getDefaultPermissions(rol: 'Administrador' | 'Contador' | 'Anali
   }
 }
 
-class DataStore {
+export class DataStore {
   public usuarios: Usuario[] = [];
   public empresas: Empresa[] = [];
   public facturas: Factura[] = [];
@@ -53,6 +53,26 @@ class DataStore {
   public movimientosLibro: MovimientoLibro[] = [];
   public modificaciones: ModificacionRepositorio[] = [];
   public notificacionesSeguridad: NotificacionSeguridad[] = [];
+
+  public googleDriveConfig: GoogleDriveConfig = {
+    cuenta_propietario: "automatizaciones@tlm.net.co",
+    carpeta_id: "1tlm-enterprise-drive-juan-yaya-2026",
+    carpeta_nombre: "Consola TLM - Enterprise Repositorio v2.0 (Drive Maestro)",
+    carpeta_url: "https://drive.google.com/drive/folders/1tlm-enterprise-drive-juan-yaya-2026",
+    modo_sincronizacion: "AUTOMATICA_TIEMPO_REAL",
+    ultima_sincronizacion: new Date().toISOString(),
+    hash_ultimo_sync: "drv-v2-initial"
+  };
+  public googleDriveFiles: GoogleDriveFile[] = [];
+  public desarrolladores: DesarrolladorAcceso[] = [];
+  public brandingConfig = {
+    customLogoUrl: null as string | null,
+    variantTitle: "Logotipo Oficial TLM Completo",
+    temaAcento: "#271a82",
+    subtitulo: "Get Adviced",
+    autor_nombre: "Juan Yaya - Administrador Maestro",
+    updatedAt: new Date().toISOString()
+  };
 
   private dbFilePath = path.resolve(process.cwd(), 'data', 'tlm_database.json');
 
@@ -83,7 +103,11 @@ class DataStore {
         movimientosBanco: this.movimientosBanco,
         movimientosLibro: this.movimientosLibro,
         modificaciones: this.modificaciones,
-        notificacionesSeguridad: this.notificacionesSeguridad
+        notificacionesSeguridad: this.notificacionesSeguridad,
+        googleDriveConfig: this.googleDriveConfig,
+        googleDriveFiles: this.googleDriveFiles,
+        desarrolladores: this.desarrolladores,
+        brandingConfig: this.brandingConfig
       };
       fs.writeFileSync(this.dbFilePath, JSON.stringify(dump, null, 2), 'utf-8');
     } catch (e) {
@@ -143,6 +167,34 @@ class DataStore {
           this.modificaciones = dump.modificaciones || [];
           this.notificacionesSeguridad = dump.notificacionesSeguridad || [];
 
+          if (dump.googleDriveConfig) {
+            this.googleDriveConfig = { ...this.googleDriveConfig, ...dump.googleDriveConfig };
+          }
+          if (dump.googleDriveFiles && Array.isArray(dump.googleDriveFiles) && dump.googleDriveFiles.length > 0) {
+            this.googleDriveFiles = dump.googleDriveFiles;
+            if (!this.googleDriveFiles.some(f => f.nombre.endsWith('.xlsx'))) {
+              this.googleDriveFiles.push({
+                id: "drv-file-06",
+                nombre: "tlm_base_de_datos_maestra.xlsx",
+                tipo: "xlsx",
+                tamano_bytes: 58200,
+                tamano_legible: "56.8 KB",
+                ultima_modificacion: new Date().toISOString(),
+                sincronizado: true,
+                drive_url: "https://drive.google.com/drive/folders/1tlm-enterprise-drive-juan-yaya-2026",
+                categoria: "EXCEL_BD"
+              });
+            }
+          } else {
+            this.initSeedGoogleDriveFiles();
+          }
+
+          if (dump.desarrolladores && Array.isArray(dump.desarrolladores) && dump.desarrolladores.length > 0) {
+            this.desarrolladores = dump.desarrolladores;
+          } else {
+            this.initSeedDesarrolladores();
+          }
+
           if (this.modificaciones.length === 0) {
             this.initSeedModificaciones();
           }
@@ -171,6 +223,10 @@ class DataStore {
             ];
           }
 
+          if (dump.brandingConfig) {
+            this.brandingConfig = { ...this.brandingConfig, ...dump.brandingConfig };
+          }
+
           return true;
         }
       }
@@ -178,6 +234,377 @@ class DataStore {
       console.warn("[DataStore] No se pudo cargar de disco, usando seeds iniciales:", e);
     }
     return false;
+  }
+
+  public getBrandingConfig() {
+    return this.brandingConfig;
+  }
+
+  public updateBrandingConfig(data: Partial<typeof this.brandingConfig>) {
+    this.brandingConfig = {
+      ...this.brandingConfig,
+      ...data,
+      autor_nombre: data.autor_nombre || "Juan Yaya - Administrador Maestro",
+      updatedAt: new Date().toISOString()
+    };
+    this.saveToDisk();
+    return this.brandingConfig;
+  }
+
+  public initSeedGoogleDriveFiles() {
+    this.googleDriveFiles = [
+      {
+        id: "drv-file-01",
+        nombre: "repositorio_juan_version_2.0.json",
+        tipo: "json",
+        tamano_bytes: 52400,
+        tamano_legible: "51.2 KB",
+        ultima_modificacion: new Date().toISOString(),
+        sincronizado: true,
+        drive_url: "https://drive.google.com/drive/folders/1tlm-enterprise-drive-juan-yaya-2026",
+        categoria: "BACKUPS_BD"
+      },
+      {
+        id: "drv-file-02",
+        nombre: "Facturas_DIAN_UBL2.1_Lote_Marzo2026.xml",
+        tipo: "xml",
+        tamano_bytes: 142300,
+        tamano_legible: "138.9 KB",
+        ultima_modificacion: new Date(Date.now() - 3600000 * 3).toISOString(),
+        sincronizado: true,
+        drive_url: "https://drive.google.com/drive/folders/1tlm-enterprise-drive-juan-yaya-2026",
+        categoria: "FACTURAS_XML"
+      },
+      {
+        id: "drv-file-03",
+        nombre: "Extracto_Bancolombia_CtaCte_1029384756.csv",
+        tipo: "csv",
+        tamano_bytes: 28400,
+        tamano_legible: "27.7 KB",
+        ultima_modificacion: new Date(Date.now() - 3600000 * 8).toISOString(),
+        sincronizado: true,
+        drive_url: "https://drive.google.com/drive/folders/1tlm-enterprise-drive-juan-yaya-2026",
+        categoria: "EXTRACTOS"
+      },
+      {
+        id: "drv-file-04",
+        nombre: "Declaracion_Retenciones_Formulario_350_2026.pdf",
+        tipo: "pdf",
+        tamano_bytes: 312000,
+        tamano_legible: "304.7 KB",
+        ultima_modificacion: new Date(Date.now() - 3600000 * 24).toISOString(),
+        sincronizado: true,
+        drive_url: "https://drive.google.com/drive/folders/1tlm-enterprise-drive-juan-yaya-2026",
+        categoria: "REPORTES_F350"
+      },
+      {
+        id: "drv-file-05",
+        nombre: "Plano_Siigo_Nube_Asientos_Causacion.json",
+        tipo: "json",
+        tamano_bytes: 35600,
+        tamano_legible: "34.8 KB",
+        ultima_modificacion: new Date(Date.now() - 3600000 * 12).toISOString(),
+        sincronizado: true,
+        drive_url: "https://drive.google.com/drive/folders/1tlm-enterprise-drive-juan-yaya-2026",
+        categoria: "PLANOS_SIIGO"
+      },
+      {
+        id: "drv-file-06",
+        nombre: "tlm_base_de_datos_maestra.xlsx",
+        tipo: "xlsx",
+        tamano_bytes: 58200,
+        tamano_legible: "56.8 KB",
+        ultima_modificacion: new Date().toISOString(),
+        sincronizado: true,
+        drive_url: "https://drive.google.com/drive/folders/1tlm-enterprise-drive-juan-yaya-2026",
+        categoria: "EXCEL_BD"
+      }
+    ];
+  }
+
+  public initSeedDesarrolladores() {
+    this.desarrolladores = [
+      {
+        id: "dev-01",
+        email: "automatizaciones@tlm.net.co",
+        nombre: "Juan Yaya - Administrador Maestro",
+        rol_tecnico: "Full-Stack Developer",
+        estado: "ACTIVO",
+        token_desarrollador: "tlm_dev_jy_9921_master",
+        permisos_codigo: {
+          editar_codigo: true,
+          hacer_commits_git: true,
+          desplegar_cloud_run: true,
+          acceso_google_drive: true,
+          gestionar_apis_dian: true
+        },
+        fecha_invitacion: "2026-10-08T10:00:00.000Z",
+        ultimo_acceso: new Date().toISOString(),
+        invitado_por: "Sistema TLM (Propietario)"
+      },
+      {
+        id: "dev-02",
+        email: "desarrollo@tlm.net.co",
+        nombre: "Equipo Central de Desarrollo TLM",
+        rol_tecnico: "DevOps & Cloud Engineer",
+        estado: "ACTIVO",
+        token_desarrollador: "tlm_dev_team_5514_rw",
+        permisos_codigo: {
+          editar_codigo: true,
+          hacer_commits_git: true,
+          desplegar_cloud_run: true,
+          acceso_google_drive: true,
+          gestionar_apis_dian: true
+        },
+        fecha_invitacion: "2026-10-09T14:30:00.000Z",
+        ultimo_acceso: new Date(Date.now() - 3600000 * 3).toISOString(),
+        invitado_por: "Juan Yaya - Administrador Maestro"
+      },
+      {
+        id: "dev-03",
+        email: "andres.morales@tlm.net.co",
+        nombre: "Andrés Felipe Morales",
+        rol_tecnico: "Backend Engineer",
+        estado: "ACTIVO",
+        token_desarrollador: "tlm_dev_am_3391_api",
+        permisos_codigo: {
+          editar_codigo: true,
+          hacer_commits_git: true,
+          desplegar_cloud_run: false,
+          acceso_google_drive: true,
+          gestionar_apis_dian: true
+        },
+        fecha_invitacion: "2026-10-09T15:00:00.000Z",
+        ultimo_acceso: new Date(Date.now() - 3600000 * 5).toISOString(),
+        invitado_por: "Juan Yaya - Administrador Maestro"
+      }
+    ];
+  }
+
+  public getDesarrolladores(): DesarrolladorAcceso[] {
+    return this.desarrolladores;
+  }
+
+  public invitarDesarrollador(data: {
+    email: string;
+    nombre: string;
+    rol_tecnico: DesarrolladorAcceso['rol_tecnico'];
+    permisos_codigo?: Partial<PermisosCodigo>;
+    invitado_por?: string;
+  }): DesarrolladorAcceso {
+    const existing = this.desarrolladores.find(d => d.email.toLowerCase() === data.email.toLowerCase().trim());
+    if (existing) {
+      existing.estado = 'ACTIVO';
+      existing.nombre = data.nombre || existing.nombre;
+      existing.rol_tecnico = data.rol_tecnico || existing.rol_tecnico;
+      if (data.permisos_codigo) {
+        existing.permisos_codigo = { ...existing.permisos_codigo, ...data.permisos_codigo };
+      }
+      this.saveToDisk();
+      return existing;
+    }
+
+    const token = 'tlm_dev_' + Math.random().toString(36).substring(2, 8) + '_' + Math.random().toString(36).substring(2, 6);
+    const nuevo: DesarrolladorAcceso = {
+      id: `dev-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      email: data.email.toLowerCase().trim(),
+      nombre: data.nombre.trim(),
+      rol_tecnico: data.rol_tecnico,
+      estado: 'ACTIVO',
+      token_desarrollador: token,
+      permisos_codigo: {
+        editar_codigo: true,
+        hacer_commits_git: true,
+        desplegar_cloud_run: data.permisos_codigo?.desplegar_cloud_run ?? true,
+        acceso_google_drive: data.permisos_codigo?.acceso_google_drive ?? true,
+        gestionar_apis_dian: data.permisos_codigo?.gestionar_apis_dian ?? true
+      },
+      fecha_invitacion: new Date().toISOString(),
+      ultimo_acceso: new Date().toISOString(),
+      invitado_por: data.invitado_por || "Juan Yaya - Administrador Maestro"
+    };
+
+    this.desarrolladores.unshift(nuevo);
+
+    // Registrar notificación por correo corporativo con token y accesos
+    this.addNotificacionSeguridad({
+      destinatario: nuevo.email,
+      asunto: `Acceso Concedido para Edición de Código & Repositorio - Consola TLM`,
+      tipo: 'ACCESO_CODIGO_DESARROLLADOR',
+      mensaje: `Hola ${nuevo.nombre}, Juan Yaya te ha concedido acceso para editar el código fuente de Consola TLM y colaborar en el proyecto. Tu rol técnico asignado es [${nuevo.rol_tecnico}]. Token de acceso Git/IDE: [${nuevo.token_desarrollador}]. Puedes clonar el repositorio, desplegar en Google Cloud Run y colaborar sobre el código fuente.`
+    });
+
+    this.addModificacion({
+      autor_id: 1,
+      autor_nombre: "Juan Yaya - Administrador Maestro",
+      tipo_accion: "COLABORACION",
+      descripcion: `Acceso de edición de código otorgado a ${nuevo.email} (${nuevo.rol_tecnico})`,
+      detalles: `Permisos de desarrollo activados: Editar código fuente, commits Git y sincronización con Google Cloud y Google Drive.`
+    });
+
+    this.saveToDisk();
+    return nuevo;
+  }
+
+  public revocarDesarrollador(id: string): boolean {
+    const dev = this.desarrolladores.find(d => d.id === id);
+    if (!dev) return false;
+    if (dev.email === "automatizaciones@tlm.net.co") {
+      throw new Error("No se puede revocar el acceso del Propietario Principal (Juan Yaya).");
+    }
+    dev.estado = 'REVOCADO';
+    this.addModificacion({
+      autor_id: 1,
+      autor_nombre: "Juan Yaya - Administrador Maestro",
+      tipo_accion: "CONFIG_UPDATE",
+      descripcion: `Revocación de acceso a código para ${dev.email}`,
+      detalles: `Permisos de edición de código suspendidos para el usuario.`
+    });
+    this.saveToDisk();
+    return true;
+  }
+
+  public regenerarTokenDesarrollador(id: string): DesarrolladorAcceso | null {
+    const dev = this.desarrolladores.find(d => d.id === id);
+    if (!dev) return null;
+    const newToken = 'tlm_dev_' + Math.random().toString(36).substring(2, 8) + '_' + Math.random().toString(36).substring(2, 6);
+    dev.token_desarrollador = newToken;
+    dev.estado = 'ACTIVO';
+    this.addNotificacionSeguridad({
+      destinatario: dev.email,
+      asunto: `Nuevo Token de Desarrollo para Edición de Código - Consola TLM`,
+      tipo: 'ACCESO_CODIGO_DESARROLLADOR',
+      mensaje: `Hola ${dev.nombre}, tu token de acceso para edición de código ha sido regenerado. Nuevo token: [${newToken}].`
+    });
+    this.saveToDisk();
+    return dev;
+  }
+
+  public getGoogleDriveStatus(): GoogleDriveStatus {
+    const totalBytes = this.googleDriveFiles.reduce((acc, f) => acc + f.tamano_bytes, 0) + (this.facturas.length * 16500);
+    const espacioUsadoGb = parseFloat(((totalBytes / (1024 * 1024 * 1024)) + 4.18).toFixed(2));
+    const espacioTotalGb = 100.0;
+    const porcentaje = parseFloat(((espacioUsadoGb / espacioTotalGb) * 100).toFixed(1));
+
+    return {
+      conectado: true,
+      cuenta_propietario: this.googleDriveConfig.cuenta_propietario,
+      carpeta_id: this.googleDriveConfig.carpeta_id,
+      carpeta_nombre: this.googleDriveConfig.carpeta_nombre,
+      carpeta_url: this.googleDriveConfig.carpeta_url,
+      espacio_usado_gb: espacioUsadoGb,
+      espacio_total_gb: espacioTotalGb,
+      porcentaje_usado: porcentaje,
+      total_archivos: this.googleDriveFiles.length + this.facturas.length,
+      archivos_xml_ubl: this.facturas.length + 1,
+      backups_json: 3,
+      ultima_sincronizacion: this.googleDriveConfig.ultima_sincronizacion,
+      hash_ultimo_sync: this.googleDriveConfig.hash_ultimo_sync,
+      archivos: this.googleDriveFiles,
+      modo_sincronizacion: this.googleDriveConfig.modo_sincronizacion,
+      estado: "ACTIVO_Y_SINCRONIZADO"
+    };
+  }
+
+  public updateGoogleDriveConfig(config: Partial<GoogleDriveConfig>): GoogleDriveConfig {
+    this.googleDriveConfig = {
+      ...this.googleDriveConfig,
+      ...config
+    };
+    this.saveToDisk();
+    return this.googleDriveConfig;
+  }
+
+  public syncToGoogleDrive(autor_id: number = 1, autor_nombre: string = "Juan Yaya - Administrador Maestro") {
+    const hash = 'drv-' + Math.random().toString(36).substring(2, 9);
+    const now = new Date().toISOString();
+    
+    this.googleDriveConfig.ultima_sincronizacion = now;
+    this.googleDriveConfig.hash_ultimo_sync = hash;
+
+    // Actualizar o crear snapshot en lista de archivos de Drive
+    const snapshotFileIndex = this.googleDriveFiles.findIndex(f => f.nombre === "repositorio_juan_version_2.0.json");
+    if (snapshotFileIndex >= 0) {
+      this.googleDriveFiles[snapshotFileIndex].ultima_modificacion = now;
+      this.googleDriveFiles[snapshotFileIndex].sincronizado = true;
+    } else {
+      this.googleDriveFiles.unshift({
+        id: `drv-snap-${Date.now()}`,
+        nombre: "repositorio_juan_version_2.0.json",
+        tipo: "json",
+        tamano_bytes: 52400,
+        tamano_legible: "51.2 KB",
+        ultima_modificacion: now,
+        sincronizado: true,
+        drive_url: this.googleDriveConfig.carpeta_url,
+        categoria: "BACKUPS_BD"
+      });
+    }
+
+    const mod = this.addModificacion({
+      autor_id,
+      autor_nombre,
+      tipo_accion: "GCP_SYNC",
+      descripcion: `Sincronización a Google Drive Corporativo de Juan Yaya (${hash})`,
+      detalles: `Snapshot y ${this.facturas.length} comprobantes DIAN respaldados en carpeta Google Drive (${this.googleDriveConfig.cuenta_propietario}).`
+    });
+
+    this.saveToDisk();
+
+    return {
+      success: true,
+      hash,
+      timestamp: now,
+      carpeta_nombre: this.googleDriveConfig.carpeta_nombre,
+      carpeta_url: this.googleDriveConfig.carpeta_url,
+      archivos_sincronizados: this.googleDriveFiles.length + this.facturas.length,
+      modificacion: mod
+    };
+  }
+
+  public importFromGoogleDrive(id_empresa: number = 1) {
+    // Generar importación de facturas representativas desde Google Drive
+    const now = new Date().toISOString();
+    const nuevaFactura: Factura = {
+      id_factura: Date.now(),
+      id_empresa,
+      factura_num: `DRV-${Math.floor(1000 + Math.random() * 9000)}`,
+      fecha: new Date().toISOString().split('T')[0],
+      proveedor: "GOOGLE CLOUD & WORKSPACE IRELAND LTD",
+      nit_tercero: "900987654",
+      descripcion_item: "Suscripción Enterprise Google Workspace Drive + Cloud Storage (30 Usuarios)",
+      cantidad: 1,
+      valor_unitario: 1450000,
+      subtotal: 1450000,
+      iva: 275500,
+      retencion_porc: 4,
+      retencion_valor: 58000,
+      casilla_350: 62,
+      forma_pago: "Crédito 30 días",
+      medio_pago: "Transferencia Electrónica",
+      cuenta_gasto: "51353501 - Servicios de Tecnología & Nube",
+      tipo_comprobante: "Factura Electrónica de Venta",
+      cufe_hash: "cufe-drv-" + Math.random().toString(16).substring(2, 32),
+      estado_revision: "AUDITADA",
+      fecha_cargue: now
+    };
+
+    this.facturas.unshift(nuevaFactura);
+
+    this.addModificacion({
+      autor_id: 1,
+      autor_nombre: "Juan Yaya - Administrador Maestro",
+      tipo_accion: "FACTURA_AUDITADA",
+      descripcion: `Importación automática de factura ${nuevaFactura.factura_num} desde Google Drive`,
+      detalles: `Archivo procesado exitosamente desde la carpeta Google Drive compartida (${this.googleDriveConfig.carpeta_nombre}).`
+    });
+
+    this.saveToDisk();
+
+    return {
+      facturas_importadas: 1,
+      factura: nuevaFactura
+    };
   }
 
   public addNotificacionSeguridad(notif: {

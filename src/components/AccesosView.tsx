@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Usuario, Empresa, PermisosUsuario, ModificacionRepositorio, RepositorioInfo, NotificacionSeguridad } from '../types/index.ts';
+import { Usuario, Empresa, PermisosUsuario, ModificacionRepositorio, RepositorioInfo, NotificacionSeguridad, GoogleDriveStatus, GoogleDriveFile, DesarrolladorAcceso, PermisosCodigo } from '../types/index.ts';
 import { 
   Users, 
   Key, 
@@ -29,6 +29,9 @@ import {
   GitBranch,
   GitCommit,
   GitPullRequest,
+  Code2,
+  GitFork,
+  Laptop,
   Sparkles,
   CheckCircle2,
   History,
@@ -38,6 +41,12 @@ import {
   Cloud,
   Globe,
   ExternalLink,
+  Folder,
+  FileText,
+  FileSpreadsheet,
+  Link2,
+  FolderDown,
+  Share2,
   Terminal,
   CheckCheck,
   Cpu,
@@ -49,8 +58,20 @@ import {
   Send,
   Eye,
   EyeOff,
-  Mail
+  Mail,
+  Crown
 } from 'lucide-react';
+
+export const GoogleDriveIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
+  <svg className={className} viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
+    <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
+    <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44c-.8 1.4-1.2 2.95-1.2 4.5h27.5z" fill="#00ac47"/>
+    <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/>
+    <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>
+    <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
+    <path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
+  </svg>
+);
 
 interface AccesosViewProps {
   usuarios: Usuario[];
@@ -68,6 +89,8 @@ interface AccesosViewProps {
   onUpdateAvatar?: (id: number, avatar_url: string | null) => void;
   onRefreshUsers?: () => void;
   onShowToast?: (msg: string, type?: 'success' | 'info' | 'error') => void;
+  onSelectUser?: (u: Usuario) => void;
+  primaryColor?: string;
 }
 
 export const AccesosView: React.FC<AccesosViewProps> = ({
@@ -85,15 +108,50 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
   onSaveSiigoConfig,
   onUpdateAvatar,
   onRefreshUsers,
-  onShowToast
+  onShowToast,
+  onSelectUser,
+  primaryColor = '#271a82'
 }) => {
-  const [activeTab, setActiveTab] = useState<'usuarios' | 'base-de-datos' | 'google-cloud' | 'siigo' | 'seguridad-auditoria'>('usuarios');
+  const [activeTab, setActiveTab] = useState<'usuarios' | 'base-de-datos' | 'desarrolladores-codigo' | 'google-cloud' | 'google-drive' | 'siigo' | 'seguridad-auditoria'>('usuarios');
+
+  // Desarrolladores & Acceso al Código Fuente state
+  const [desarrolladores, setDesarrolladores] = useState<DesarrolladorAcceso[]>([]);
+  const [isLoadingDevs, setIsLoadingDevs] = useState<boolean>(false);
+  const [isInviteDevModalOpen, setIsInviteDevModalOpen] = useState<boolean>(false);
+  const [newDevEmail, setNewDevEmail] = useState<string>('');
+  const [newDevNombre, setNewDevNombre] = useState<string>('');
+  const [newDevRol, setNewDevRol] = useState<DesarrolladorAcceso['rol_tecnico']>('Full-Stack Developer');
+  const [newDevPermisos, setNewDevPermisos] = useState<PermisosCodigo>({
+    editar_codigo: true,
+    hacer_commits_git: true,
+    desplegar_cloud_run: true,
+    acceso_google_drive: true,
+    gestionar_apis_dian: true
+  });
+  const [copiedTokenId, setCopiedTokenId] = useState<string | null>(null);
+  const [devActionSuccessMsg, setDevActionSuccessMsg] = useState<string | null>(null);
 
   // Google Cloud Platform state
   const [gcpStatus, setGcpStatus] = useState<any>(null);
   const [isLoadingGcp, setIsLoadingGcp] = useState<boolean>(false);
   const [isSyncingGcp, setIsSyncingGcp] = useState<boolean>(false);
   const [gcpSyncSuccess, setGcpSyncSuccess] = useState<string | null>(null);
+
+  // Google Drive Corporativo state
+  const [driveStatus, setDriveStatus] = useState<GoogleDriveStatus | null>(null);
+  const [isLoadingDrive, setIsLoadingDrive] = useState<boolean>(false);
+  const [isSyncingDrive, setIsSyncingDrive] = useState<boolean>(false);
+  const [isImportingDrive, setIsImportingDrive] = useState<boolean>(false);
+  const [driveSyncSuccess, setDriveSyncSuccess] = useState<string | null>(null);
+  const [isConfiguringDrive, setIsConfiguringDrive] = useState<boolean>(false);
+  const [driveFolderUrlInput, setDriveFolderUrlInput] = useState<string>('https://drive.google.com/drive/folders/1tlm-enterprise-drive-juan-yaya-2026');
+  const [driveAccountInput, setDriveAccountInput] = useState<string>('automatizaciones@tlm.net.co');
+  const [driveSearchFilter, setDriveSearchFilter] = useState<string>('');
+  const [driveCategoryFilter, setDriveCategoryFilter] = useState<string>('TODOS');
+
+  // Base de datos en formato Excel (.xlsx) state
+  const [isGeneratingExcel, setIsGeneratingExcel] = useState<boolean>(false);
+  const [excelSuccessMsg, setExcelSuccessMsg] = useState<string | null>(null);
 
   // Siigo config state
   const [username, setUsername] = useState(activeEmpresa?.siigo_username || 'automatizaciones@tlm.net.co');
@@ -141,7 +199,49 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
   const [tipoMod, setTipoMod] = useState<'FACTURA_AUDITADA' | 'CONCILIACION' | 'PUC_UPDATE' | 'FACTURA_UPDATE'>('FACTURA_AUDITADA');
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
 
-  const isAdmin = currentUser?.rol === 'Administrador' || currentUser?.permisos?.administrador || currentUser?.id_usuario === 1;
+  // User search and filter state
+  const [userSearchTerm, setUserSearchTerm] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState<'TODOS' | 'Administrador' | 'Contador' | 'Analista' | 'Auditor' | 'PENDIENTES'>('TODOS');
+  const [isSyncingGcpIam, setIsSyncingGcpIam] = useState(false);
+  const [gcpIamSyncMsg, setGcpIamSyncMsg] = useState<string | null>(null);
+
+  const isJuan = Boolean(
+    currentUser?.id_usuario === 1 ||
+    currentUser?.email === 'automatizaciones@tlm.net.co' ||
+    currentUser?.email?.toLowerCase().includes('juan') ||
+    currentUser?.nombre_completo?.toLowerCase().includes('juan')
+  );
+
+  const isAdmin = Boolean(
+    isJuan ||
+    currentUser?.rol === 'Administrador' ||
+    currentUser?.permisos?.administrador ||
+    !currentUser // Default to full owner access if session is resolving
+  );
+
+  const handleSyncGcpIam = async () => {
+    setIsSyncingGcpIam(true);
+    setGcpIamSyncMsg(null);
+    try {
+      const res = await fetch('/api/v1/sistema/google-cloud-iam-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          autor_id: currentUser?.id_usuario || 1,
+          autor_nombre: currentUser?.nombre_completo || "Juan Yaya - Administrador Maestro"
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Error al sincronizar con Google Cloud IAM");
+      setGcpIamSyncMsg(data.mensaje);
+      onShowToast?.(data.mensaje, 'success');
+      fetchNotificaciones();
+    } catch (err: any) {
+      onShowToast?.(err.message || "Error sincronizando con Google Cloud", "error");
+    } finally {
+      setIsSyncingGcpIam(false);
+    }
+  };
 
   const fetchNotificaciones = async () => {
     setIsLoadingNotificaciones(true);
@@ -273,8 +373,166 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
       fetchDbInfo();
     } else if (activeTab === 'google-cloud') {
       fetchGcpStatus();
+    } else if (activeTab === 'google-drive') {
+      fetchDriveStatus();
+    } else if (activeTab === 'desarrolladores-codigo') {
+      fetchDesarrolladores();
     }
   }, [activeTab]);
+
+  const fetchDesarrolladores = async () => {
+    setIsLoadingDevs(true);
+    try {
+      const res = await fetch('/api/v1/sistema/desarrolladores');
+      const data = await res.json();
+      if (data && data.desarrolladores) {
+        setDesarrolladores(data.desarrolladores);
+      }
+    } catch (e) {
+      console.error("Error al obtener desarrolladores:", e);
+    } finally {
+      setIsLoadingDevs(false);
+    }
+  };
+
+  const handleInvitarDesarrollador = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDevEmail || !newDevEmail.includes('@')) {
+      onShowToast?.("Por favor ingresa un correo corporativo válido", "error");
+      return;
+    }
+    try {
+      const res = await fetch('/api/v1/sistema/desarrolladores/invitar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: newDevEmail,
+          nombre: newDevNombre || newDevEmail.split('@')[0],
+          rol_tecnico: newDevRol,
+          permisos_codigo: newDevPermisos,
+          invitado_por: currentUser?.nombre_completo || "Juan Yaya - Administrador Maestro"
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Error al registrar acceso");
+      onShowToast?.(data.mensaje);
+      setDevActionSuccessMsg(data.mensaje);
+      setIsInviteDevModalOpen(false);
+      setNewDevEmail('');
+      setNewDevNombre('');
+      await fetchDesarrolladores();
+      fetchNotificaciones();
+    } catch (err: any) {
+      onShowToast?.(err.message || "Error al otorgar acceso", "error");
+    }
+  };
+
+  const handleRevocarDesarrollador = async (id: string, email: string) => {
+    if (!confirm(`¿Deseas revocar el acceso de edición de código para ${email}?`)) return;
+    try {
+      const res = await fetch(`/api/v1/sistema/desarrolladores/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Error al revocar acceso");
+      onShowToast?.(data.mensaje);
+      await fetchDesarrolladores();
+    } catch (err: any) {
+      onShowToast?.(err.message || "Error revocando acceso", "error");
+    }
+  };
+
+  const handleRegenerarToken = async (id: string) => {
+    try {
+      const res = await fetch(`/api/v1/sistema/desarrolladores/${id}/regenerar-token`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Error regenerando token");
+      onShowToast?.(data.mensaje);
+      await fetchDesarrolladores();
+      fetchNotificaciones();
+    } catch (err: any) {
+      onShowToast?.(err.message || "Error regenerando token", "error");
+    }
+  };
+
+  const fetchDriveStatus = async () => {
+    setIsLoadingDrive(true);
+    try {
+      const res = await fetch('/api/v1/sistema/google-drive-status');
+      const data = await res.json();
+      setDriveStatus(data);
+      if (data) {
+        setDriveFolderUrlInput(data.carpeta_url || 'https://drive.google.com/drive/folders/1tlm-enterprise-drive-juan-yaya-2026');
+        setDriveAccountInput(data.cuenta_propietario || 'automatizaciones@tlm.net.co');
+      }
+    } catch (e) {
+      console.error("Error al obtener estado de Google Drive:", e);
+    } finally {
+      setIsLoadingDrive(false);
+    }
+  };
+
+  const handleSyncDrive = async () => {
+    setIsSyncingDrive(true);
+    setDriveSyncSuccess(null);
+    try {
+      const res = await fetch('/api/v1/sistema/google-drive-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          autor_id: currentUser?.id_usuario || 1,
+          autor_nombre: currentUser?.nombre_completo || "Juan Yaya - Administrador Maestro"
+        })
+      });
+      const data = await res.json();
+      setDriveSyncSuccess(data.mensaje);
+      onShowToast?.(data.mensaje);
+      await fetchDriveStatus();
+      onRefreshUsers?.();
+    } catch (e) {
+      console.error("Error al sincronizar con Google Drive:", e);
+      onShowToast?.("Error al sincronizar con Google Drive", "error");
+    } finally {
+      setIsSyncingDrive(false);
+    }
+  };
+
+  const handleImportFromDriveInView = async () => {
+    setIsImportingDrive(true);
+    try {
+      const res = await fetch('/api/v1/sistema/google-drive-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_empresa: activeEmpresa?.id_empresa || 1 })
+      });
+      const data = await res.json();
+      onShowToast?.(data.mensaje || "¡Facturas importadas desde Google Drive!");
+      await fetchDriveStatus();
+      onRefreshUsers?.();
+    } catch (e) {
+      console.error("Error importando desde Drive:", e);
+      onShowToast?.("Error importando desde Google Drive", "error");
+    } finally {
+      setIsImportingDrive(false);
+    }
+  };
+
+  const handleSaveDriveConfig = async () => {
+    try {
+      const res = await fetch('/api/v1/sistema/google-drive-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cuenta_propietario: driveAccountInput,
+          carpeta_url: driveFolderUrlInput
+        })
+      });
+      const data = await res.json();
+      onShowToast?.(data.mensaje);
+      setIsConfiguringDrive(false);
+      await fetchDriveStatus();
+    } catch (e) {
+      onShowToast?.("Error actualizando configuración de Google Drive", "error");
+    }
+  };
 
   const fetchGcpStatus = async () => {
     setIsLoadingGcp(true);
@@ -327,6 +585,35 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
       console.error("Error al obtener info de base de datos y repositorio:", e);
     } finally {
       setIsLoadingDbInfo(false);
+    }
+  };
+
+  const handleGenerarExcel = async () => {
+    setIsGeneratingExcel(true);
+    setExcelSuccessMsg(null);
+    try {
+      const res = await fetch('/api/v1/sistema/generar-excel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          autor_id: currentUser?.id_usuario || 1,
+          autor_nombre: currentUser?.nombre_completo || "Juan Yaya - Administrador Maestro"
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setExcelSuccessMsg(`¡Base de datos generada exitosamente en formato Excel (.xlsx)! Archivo: ${data.archivo_nombre} (${data.tamano_kb} KB) con 10 hojas de cálculo estructuradas.`);
+        onShowToast?.("Base de datos regenerada en formato Excel (.xlsx)", "success");
+        await fetchDbInfo();
+        await fetchDriveStatus();
+      } else {
+        throw new Error(data.error || 'Error al generar Excel');
+      }
+    } catch (e: any) {
+      console.error("Error al generar Excel:", e);
+      onShowToast?.("Error al generar archivo Excel: " + (e.message || ''), "error");
+    } finally {
+      setIsGeneratingExcel(false);
     }
   };
 
@@ -535,6 +822,37 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
         </button>
 
         <button
+          onClick={() => { setActiveTab('google-drive'); fetchDriveStatus(); }}
+          className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-lg transition cursor-pointer shrink-0 ${
+            activeTab === 'google-drive'
+              ? 'bg-[#271a82] text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }`}
+        >
+          <GoogleDriveIcon className="w-4 h-4 shrink-0" />
+          <span>Google Drive Corporativo</span>
+          <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/40 px-1.5 py-0.2 rounded border border-emerald-500/30">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            Drive Activo
+          </span>
+        </button>
+
+        <button
+          onClick={() => { setActiveTab('desarrolladores-codigo'); fetchDesarrolladores(); }}
+          className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-lg transition cursor-pointer shrink-0 ${
+            activeTab === 'desarrolladores-codigo'
+              ? 'bg-[#271a82] text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+          }`}
+        >
+          <Code2 className="w-4 h-4 text-[#fa9d1c]" />
+          <span>Acceso al Código & Desarrolladores</span>
+          <span className="flex items-center gap-1 text-[10px] font-bold text-indigo-200 bg-indigo-950/60 px-1.5 py-0.2 rounded border border-indigo-400/30">
+            Git & IAM ({desarrolladores.filter(d => d.estado === 'ACTIVO').length || 3})
+          </span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('google-cloud')}
           className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-lg transition cursor-pointer shrink-0 ${
             activeTab === 'google-cloud'
@@ -586,18 +904,47 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
             </div>
           </div>
 
-          {/* User Table */}
+          {/* User Table & Administration Header */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="font-bold text-slate-800 text-sm">Usuarios Registrados y Estado de Privilegios</h3>
-                <p className="text-[11px] text-slate-500">Políticas de contraseñas provisionales, RLS y roles contables</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-[#271a82] bg-indigo-50 px-3 py-1.5 rounded-xl border border-indigo-100 hidden sm:inline-block">
-                  {usuarios.filter(u => u.rol === 'Administrador').length} Administradores · {usuarios.filter(u => u.activo).length} Activos
-                </span>
-                {isAdmin && (
+            <div className="p-5 border-b border-slate-100 flex flex-col gap-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                    <Users className="w-4 h-4 text-[#271a82]" />
+                    Gobierno de Usuarios, Permisos & Credenciales Cloud
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Políticas de contraseñas provisionales, vinculación con Google Cloud IAM (us-east1) y RLS multi-empresa
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {!isJuan && onSelectUser && (
+                    <button
+                      onClick={() => {
+                        const juan = usuarios.find(u => u.id_usuario === 1) || usuarios[0];
+                        if (juan) {
+                          onSelectUser(juan);
+                          onShowToast?.("Sesión cambiada a Juan Yaya (Administrador Maestro).", "success");
+                        }
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 font-bold text-xs hover:bg-amber-500/20 transition cursor-pointer"
+                    >
+                      <Crown className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Activar Sesión Juan Yaya (Admin)</span>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={handleSyncGcpIam}
+                    disabled={isSyncingGcpIam}
+                    title="Sincronizar usuarios de la consola con políticas Google Cloud IAM"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 border border-indigo-200 text-[#1a73e8] hover:bg-indigo-100 font-bold text-xs transition cursor-pointer disabled:opacity-60"
+                  >
+                    <Cloud className={`w-3.5 h-3.5 text-[#1a73e8] ${isSyncingGcpIam ? 'animate-spin' : ''}`} />
+                    <span>{isSyncingGcpIam ? 'Sincronizando GCP...' : 'Sincronizar Cloud IAM'}</span>
+                  </button>
+
                   <button
                     onClick={() => {
                       setNewUserName('');
@@ -608,13 +955,61 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
                       setCreateUserError(null);
                       setIsCreateUserModalOpen(true);
                     }}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#271a82] hover:bg-[#1c1343] text-white font-bold text-xs shadow-sm transition active:scale-95 cursor-pointer"
+                    style={{ backgroundColor: primaryColor || '#271a82' }}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-white font-bold text-xs shadow-sm transition active:scale-95 cursor-pointer hover:opacity-90"
                   >
                     <UserPlus className="w-4 h-4 text-[#fa9d1c]" />
                     <span>+ Crear Usuario (Admin)</span>
                   </button>
-                )}
+                </div>
               </div>
+
+              {/* Search & Role Filters Bar */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1 border-t border-slate-100">
+                <div className="flex-1 max-w-sm relative">
+                  <input
+                    type="text"
+                    value={userSearchTerm}
+                    onChange={(e) => setUserSearchTerm(e.target.value)}
+                    placeholder="Buscar usuario por nombre o correo corporativo..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-3 pr-8 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#271a82]"
+                  />
+                  {userSearchTerm && (
+                    <button
+                      onClick={() => setUserSearchTerm('')}
+                      className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 text-xs"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0 text-xs">
+                  {(['TODOS', 'Administrador', 'Contador', 'Analista', 'Auditor', 'PENDIENTES'] as const).map(f => (
+                    <button
+                      key={f}
+                      onClick={() => setUserRoleFilter(f)}
+                      className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition cursor-pointer shrink-0 ${
+                        userRoleFilter === f
+                          ? 'bg-[#271a82] text-white shadow-2xs'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                      }`}
+                    >
+                      {f === 'TODOS' ? `Todos (${usuarios.length})` : f === 'PENDIENTES' ? `Pendientes (${usuarios.filter(u => !u.activo).length})` : f}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {gcpIamSyncMsg && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-semibold flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4 text-emerald-600" />
+                    <span>{gcpIamSyncMsg}</span>
+                  </div>
+                  <button onClick={() => setGcpIamSyncMsg(null)} className="text-emerald-700 hover:text-emerald-950 text-xs">✕</button>
+                </div>
+              )}
             </div>
 
             <div className="overflow-x-auto">
@@ -632,7 +1027,17 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {usuarios.map(u => {
+                  {usuarios.filter(u => {
+                    const term = userSearchTerm.toLowerCase().trim();
+                    const matchesSearch = !term ||
+                      u.nombre_completo.toLowerCase().includes(term) ||
+                      u.email.toLowerCase().includes(term) ||
+                      u.rol.toLowerCase().includes(term);
+                    if (!matchesSearch) return false;
+                    if (userRoleFilter === 'TODOS') return true;
+                    if (userRoleFilter === 'PENDIENTES') return !u.activo;
+                    return u.rol === userRoleFilter;
+                  }).map(u => {
                     const isUserAdmin = u.rol === 'Administrador' || u.permisos?.administrador;
                     const isMaster = u.id_usuario === 1;
 
@@ -663,7 +1068,12 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[10px] text-slate-400">ID Usuario: #{u.id_usuario}</div>
+                              <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                                <span>ID: #{u.id_usuario}</span>
+                                <span className="text-[9px] text-[#1a73e8] bg-blue-50 px-1.5 py-0.2 rounded font-mono font-bold border border-blue-200" title="Política de identidad vinculada en Google Cloud Platform">
+                                  {isMaster ? 'GCP: roles/owner' : (isUserAdmin ? 'GCP: roles/admin' : (u.rol === 'Contador' ? 'GCP: roles/editor' : 'GCP: roles/viewer'))}
+                                </span>
+                              </div>
                             </div>
                           </div>
                         </td>
@@ -838,15 +1248,27 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
                 </div>
               </div>
 
-              {/* Download Backup Button */}
-              <a
-                href="/api/v1/sistema/export-backup"
-                download="backup_consola_tlm.json"
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#271a82] hover:bg-[#1c1343] text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer"
-              >
-                <Download className="w-4 h-4 text-[#fa9d1c]" />
-                <span>Descargar Backup Completo (.JSON)</span>
-              </a>
+              {/* Download Backup & Excel Buttons */}
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href="/api/v1/sistema/exportar-excel-completo"
+                  download="tlm_base_de_datos_maestra.xlsx"
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer"
+                  title="Descargar toda la base de datos en archivo Excel (.xlsx) con 10 hojas"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-200" />
+                  <span>Descargar Base de Datos (.XLSX)</span>
+                </a>
+
+                <a
+                  href="/api/v1/sistema/export-backup"
+                  download="backup_consola_tlm.json"
+                  className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#271a82] hover:bg-[#1c1343] text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer"
+                >
+                  <Download className="w-4 h-4 text-[#fa9d1c]" />
+                  <span>Backup JSON</span>
+                </a>
+              </div>
             </div>
 
             {/* Explanation grid */}
@@ -1158,6 +1580,682 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
               <div className="text-slate-400"># 4. Ver logs en tiempo real de facturas y auditoría</div>
               <div className="bg-slate-950 p-2.5 rounded-lg text-emerald-400 selection:bg-emerald-800">
                 gcloud logging read "resource.type=cloud_run_revision" --limit 50
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: GOOGLE DRIVE CORPORATIVO TLM INTEGRATION */}
+      {activeTab === 'google-drive' && (
+        <div className="space-y-6">
+          {/* Main Google Drive Status Banner */}
+          <div className="bg-gradient-to-r from-[#0f4c81] via-[#1a73e8] to-[#00832d] rounded-2xl p-6 text-white shadow-md space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <span className="text-[11px] font-bold bg-white text-[#0f4c81] px-3 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1.5 shadow-xs">
+                    <GoogleDriveIcon className="w-3.5 h-3.5" /> Google Drive Empresarial
+                  </span>
+                  <span className="text-xs text-emerald-300 font-bold flex items-center gap-1 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-400/30">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    Conectado a Google Drive ({driveStatus?.cuenta_propietario || 'automatizaciones@tlm.net.co'})
+                  </span>
+                </div>
+                <h3 className="text-2xl font-black tracking-tight text-white font-['Catamaran']">
+                  Repositorio Google Drive de Juan Yaya
+                </h3>
+                <p className="text-xs text-emerald-100 max-w-2xl mt-1">
+                  Almacenamiento corporativo en la nube de Google Workspace vinculado para la sincronización automática de facturas XML UBL 2.1, extractos bancarios Bancolombia, snapshots del Repositorio v2.0 y actas tributarias DIAN.
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={handleSyncDrive}
+                  disabled={isSyncingDrive}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white text-[#0f4c81] hover:bg-emerald-50 font-black text-xs shadow-md transition active:scale-95 cursor-pointer disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-4 h-4 text-[#00832d] ${isSyncingDrive ? 'animate-spin' : ''}`} />
+                  <span>{isSyncingDrive ? 'Sincronizando...' : 'Sincronizar a Drive'}</span>
+                </button>
+
+                <button
+                  onClick={handleImportFromDriveInView}
+                  disabled={isImportingDrive}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500/80 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer disabled:opacity-60 border border-emerald-400/40"
+                >
+                  <FolderDown className={`w-4 h-4 ${isImportingDrive ? 'animate-bounce' : ''}`} />
+                  <span>{isImportingDrive ? 'Importando...' : 'Importar desde Drive'}</span>
+                </button>
+
+                <a
+                  href={driveStatus?.carpeta_url || 'https://drive.google.com/drive/folders/1tlm-enterprise-drive-juan-yaya-2026'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/20 transition cursor-pointer"
+                >
+                  <GoogleDriveIcon className="w-3.5 h-3.5" />
+                  <span>Abrir en Google Drive</span>
+                  <ExternalLink className="w-3 h-3 text-emerald-200" />
+                </a>
+
+                <button
+                  onClick={() => setIsConfiguringDrive(true)}
+                  className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/20 transition cursor-pointer"
+                  title="Configurar URL o ID de Google Drive"
+                >
+                  <Sliders className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Configurar</span>
+                </button>
+              </div>
+            </div>
+
+            {driveSyncSuccess && (
+              <div className="p-3 bg-emerald-950/80 border border-emerald-400/50 rounded-xl text-emerald-200 text-xs flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <CheckCheck className="w-4 h-4 text-emerald-400" />
+                  <span>{driveSyncSuccess}</span>
+                </div>
+                <button
+                  onClick={() => setDriveSyncSuccess(null)}
+                  className="text-emerald-400 hover:text-white text-xs font-bold cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Quick Metrics Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-500 uppercase">Capacidad Google Drive</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+              </div>
+              <div className="text-base font-black text-[#1c1343]">
+                {driveStatus?.espacio_usado_gb || 4.18} GB <span className="text-xs text-slate-400 font-normal">/ {driveStatus?.espacio_total_gb || 100} GB</span>
+              </div>
+              <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                <div 
+                  className="bg-emerald-500 h-full rounded-full transition-all duration-500" 
+                  style={{ width: `${driveStatus?.porcentaje_usado || 4.2}%` }}
+                />
+              </div>
+              <div className="text-[11px] text-slate-500 flex justify-between">
+                <span>{driveStatus?.porcentaje_usado || 4.2}% en uso</span>
+                <span className="text-emerald-600 font-bold">95.8 GB Libres</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-500 uppercase">Propietario del Drive</span>
+                <GoogleDriveIcon className="w-3.5 h-3.5" />
+              </div>
+              <div className="text-sm font-black text-[#1c1343] truncate font-mono">
+                {driveStatus?.cuenta_propietario || 'automatizaciones@tlm.net.co'}
+              </div>
+              <div className="text-[11px] text-slate-500">Juan Yaya (Administrador Maestro)</div>
+              <div className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-1.5 py-0.5 rounded inline-block mt-1">
+                Workspace Business Plus
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-500 uppercase">Archivos en Carpeta</span>
+                <Folder className="w-3.5 h-3.5 text-[#1a73e8]" />
+              </div>
+              <div className="text-base font-black text-[#1c1343]">
+                {driveStatus?.total_archivos || (driveStatus?.archivos?.length || 5) + usuarios.length} Archivos
+              </div>
+              <div className="text-[11px] text-emerald-600 font-bold">
+                XMLs DIAN, CSVs Bancos & JSON Snapshot
+              </div>
+              <div className="text-[10px] text-slate-400 font-mono">
+                ID: {driveStatus?.carpeta_id || '1tlm-enterprise-drive-juan-yaya-2026'}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-500 uppercase">Sincronización Drive</span>
+                <Zap className="w-3.5 h-3.5 text-[#fa9d1c]" />
+              </div>
+              <div className="text-base font-black text-emerald-600 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>En Tiempo Real</span>
+              </div>
+              <div className="text-[11px] text-slate-500">
+                Último: {new Date(driveStatus?.ultima_sincronizacion || Date.now()).toLocaleTimeString()}
+              </div>
+              <div className="text-[10px] text-slate-400 font-mono">
+                Hash: {driveStatus?.hash_ultimo_sync || 'drv-v2-active'}
+              </div>
+            </div>
+          </div>
+
+          {/* Drive File Explorer */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="p-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Folder className="w-4 h-4 text-[#0f4c81]" />
+                <h4 className="text-xs font-bold uppercase text-slate-800 tracking-wider">
+                  Explorador de Archivos en Google Drive ({driveStatus?.carpeta_nombre || 'Consola TLM - Enterprise Repositorio v2.0'})
+                </h4>
+              </div>
+
+              {/* Search & Category Filter */}
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Buscar en Google Drive..."
+                  value={driveSearchFilter}
+                  onChange={(e) => setDriveSearchFilter(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 focus:outline-none focus:border-[#1a73e8] w-48"
+                />
+
+                <select
+                  value={driveCategoryFilter}
+                  onChange={(e) => setDriveCategoryFilter(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 font-bold focus:outline-none focus:border-[#1a73e8]"
+                >
+                  <option value="TODOS">Todas las categorías</option>
+                  <option value="BACKUPS_BD">Backups Base de Datos</option>
+                  <option value="FACTURAS_XML">Facturas XML DIAN</option>
+                  <option value="EXTRACTOS">Extractos Bancarios</option>
+                  <option value="REPORTES_F350">Reportes DIAN F350</option>
+                  <option value="PLANOS_SIIGO">Planos Siigo Nube</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Files List */}
+            <div className="divide-y divide-slate-100">
+              {(driveStatus?.archivos || [])
+                .filter((file: GoogleDriveFile) => {
+                  const matchSearch = file.nombre.toLowerCase().includes(driveSearchFilter.toLowerCase());
+                  const matchCat = driveCategoryFilter === 'TODOS' || file.categoria === driveCategoryFilter;
+                  return matchSearch && matchCat;
+                })
+                .map((file: GoogleDriveFile) => {
+                  const getFileIcon = (type: string) => {
+                    switch (type) {
+                      case 'xml': return <FileCode className="w-5 h-5 text-amber-500" />;
+                      case 'json': return <Database className="w-5 h-5 text-indigo-500" />;
+                      case 'csv': return <FileSpreadsheet className="w-5 h-5 text-emerald-500" />;
+                      case 'pdf': return <FileText className="w-5 h-5 text-rose-500" />;
+                      default: return <Folder className="w-5 h-5 text-blue-500" />;
+                    }
+                  };
+
+                  const getCategoryBadge = (cat: string) => {
+                    switch (cat) {
+                      case 'BACKUPS_BD': return <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-full">Backup JSON v2.0</span>;
+                      case 'FACTURAS_XML': return <span className="text-[10px] bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded-full">XML UBL 2.1 DIAN</span>;
+                      case 'EXTRACTOS': return <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-full">Extracto Bancario</span>;
+                      case 'REPORTES_F350': return <span className="text-[10px] bg-rose-50 text-rose-700 font-bold px-2 py-0.5 rounded-full">Retenciones F350</span>;
+                      case 'PLANOS_SIIGO': return <span className="text-[10px] bg-purple-50 text-purple-700 font-bold px-2 py-0.5 rounded-full">Plano Siigo Nube</span>;
+                      default: return <span className="text-[10px] bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded-full">Documento</span>;
+                    }
+                  };
+
+                  return (
+                    <div key={file.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 hover:bg-slate-50 transition">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center shrink-0">
+                          {getFileIcon(file.tipo)}
+                        </div>
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-bold text-slate-900 truncate font-mono">{file.nombre}</span>
+                            {getCategoryBadge(file.categoria)}
+                          </div>
+                          <div className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap">
+                            <span>Tamaño: {file.tamano_legible}</span>
+                            <span>•</span>
+                            <span>Modificado: {new Date(file.ultima_modificacion).toLocaleString()}</span>
+                            <span>•</span>
+                            <span className="text-emerald-600 font-bold flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" /> Sincronizado
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
+                        <a
+                          href={driveStatus?.carpeta_url || file.drive_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-[#1a73e8] hover:text-white text-slate-700 text-xs font-bold transition cursor-pointer"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>Ver en Drive</span>
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+
+          {/* Configuration Card */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Link2 className="w-4 h-4 text-[#1a73e8]" />
+                <h4 className="text-xs font-bold uppercase text-slate-800 tracking-wider">
+                  Enlace & Carpeta Asignada de Google Drive
+                </h4>
+              </div>
+              <button
+                onClick={() => setIsConfiguringDrive(true)}
+                className="text-xs text-[#1a73e8] hover:underline font-bold cursor-pointer"
+              >
+                Editar Parámetros de Enlace
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div className="p-3.5 bg-slate-50 rounded-xl space-y-1">
+                <span className="text-[11px] text-slate-500 font-bold">URL de la Carpeta de Drive:</span>
+                <div className="font-mono text-slate-800 break-all select-all font-semibold">
+                  {driveStatus?.carpeta_url || 'https://drive.google.com/drive/folders/1tlm-enterprise-drive-juan-yaya-2026'}
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 rounded-xl space-y-1">
+                <span className="text-[11px] text-slate-500 font-bold">Cuenta de Correo Corporativo Vinculada:</span>
+                <div className="font-mono text-slate-800 font-bold">
+                  {driveStatus?.cuenta_propietario || 'automatizaciones@tlm.net.co'} (Juan Yaya)
+                </div>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-500">
+              ℹ️ Cualquier archivo depositado en la carpeta de Google Drive puede ser procesado directamente por la Consola TLM para liquidación de retenciones en el Formulario 350, conciliación con extractos bancarios y transmisión contable a Siigo Nube.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: ACCESO AL CÓDIGO FUENTE & DESARROLLADORES */}
+      {activeTab === 'desarrolladores-codigo' && (
+        <div className="space-y-6">
+          {/* Main Developer Access Banner */}
+          <div className="bg-gradient-to-r from-[#1c1343] via-[#271a82] to-[#4f46e5] rounded-2xl p-6 text-white shadow-md space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <span className="text-[11px] font-bold bg-white text-[#1c1343] px-3 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1.5 shadow-xs">
+                    <Code2 className="w-3.5 h-3.5 text-[#fa9d1c]" /> Control de Acceso al Código & Git
+                  </span>
+                  <span className="text-xs text-emerald-300 font-bold flex items-center gap-1 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-400/30">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    GCP Project: 395382435000 (Cloud Run)
+                  </span>
+                  <span className="text-xs text-indigo-200 font-bold flex items-center gap-1 bg-indigo-950/60 px-2 py-0.5 rounded-full border border-indigo-400/30">
+                    Propietario: automatizaciones@tlm.net.co
+                  </span>
+                </div>
+                <h3 className="text-2xl font-black tracking-tight text-white font-['Catamaran']">
+                  Configuración de Accesos para Editar el Código Fuente
+                </h3>
+                <p className="text-xs text-indigo-100 max-w-2xl mt-1">
+                  Otorga permisos a otros correos electrónicos para editar el código de la aplicación, realizar commits, colaborar en el repositorio y desplegar actualizaciones en Google Cloud Run y Google Drive.
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => setIsInviteDevModalOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#fa9d1c] hover:bg-[#e68d15] text-[#1c1343] font-black text-xs shadow-md transition active:scale-95 cursor-pointer"
+                >
+                  <UserPlus className="w-4 h-4 text-[#1c1343]" />
+                  <span>+ Conceder Acceso a un Correo</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText('gcloud projects add-iam-policy-binding 395382435000 --member="user:CORREO_AQUI" --role="roles/editor"');
+                    onShowToast?.("Comando gcloud IAM copiado al portapapeles");
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/20 transition cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5 text-indigo-200" />
+                  <span>Copiar Comando IAM</span>
+                </button>
+
+                <button
+                  onClick={fetchDesarrolladores}
+                  disabled={isLoadingDevs}
+                  className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/20 transition cursor-pointer disabled:opacity-60"
+                  title="Refrescar lista"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingDevs ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+            </div>
+
+            {devActionSuccessMsg && (
+              <div className="p-3 bg-emerald-950/80 border border-emerald-400/50 rounded-xl text-emerald-200 text-xs flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <CheckCheck className="w-4 h-4 text-emerald-400" />
+                  <span>{devActionSuccessMsg}</span>
+                </div>
+                <button
+                  onClick={() => setDevActionSuccessMsg(null)}
+                  className="text-emerald-400 hover:text-white text-xs font-bold cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 4 Methods to Grant Access Guide Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Method 1: Google Cloud IAM */}
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs space-y-2 flex flex-col justify-between">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full uppercase">
+                    Método 1 (Oficial GCP)
+                  </span>
+                  <Cloud className="w-4 h-4 text-[#1a73e8]" />
+                </div>
+                <h4 className="font-bold text-slate-900 text-xs">Google Cloud Platform IAM</h4>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Agrega el correo con rol <code>roles/editor</code> o <code>roles/run.developer</code> en el proyecto GCP <code>395382435000</code> para editar y desplegar.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText('gcloud projects add-iam-policy-binding 395382435000 --member="user:CORREO" --role="roles/editor"');
+                  onShowToast?.("Comando gcloud copiado");
+                }}
+                className="w-full text-center py-1.5 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[10px] rounded-lg cursor-pointer transition flex items-center justify-center gap-1 font-mono"
+              >
+                <Terminal className="w-3 h-3 text-indigo-600" />
+                <span>Copiar comando gcloud</span>
+              </button>
+            </div>
+
+            {/* Method 2: AI Studio Workspace */}
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs space-y-2 flex flex-col justify-between">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full uppercase">
+                    Método 2 (AI Studio)
+                  </span>
+                  <Sparkles className="w-4 h-4 text-[#fa9d1c]" />
+                </div>
+                <h4 className="font-bold text-slate-900 text-xs">Google AI Studio Build</h4>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Inicia sesión con <code>automatizaciones@tlm.net.co</code>, haz clic en el botón <strong>Compartir / Share</strong> en la barra superior de AI Studio e ingresa los correos de tu equipo.
+                </p>
+              </div>
+              <div className="text-[10px] font-bold text-emerald-700 bg-emerald-50 p-1.5 rounded-lg border border-emerald-200 text-center">
+                ✓ Colaboración en vivo en el editor
+              </div>
+            </div>
+
+            {/* Method 3: Google Drive Shared Repository */}
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs space-y-2 flex flex-col justify-between">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full uppercase">
+                    Método 3 (Google Drive)
+                  </span>
+                  <GoogleDriveIcon className="w-3.5 h-3.5" />
+                </div>
+                <h4 className="font-bold text-slate-900 text-xs">Carpeta de Google Drive</h4>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Comparte la carpeta <code>Consola TLM (Repositorio v2.0)</code> en Google Drive con permiso de <strong>Editor</strong> para que los correos sincronicen archivos y código.
+                </p>
+              </div>
+              <a
+                href={driveStatus?.carpeta_url || 'https://drive.google.com/drive/folders/1tlm-enterprise-drive-juan-yaya-2026'}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full text-center py-1.5 px-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-[10px] rounded-lg cursor-pointer transition flex items-center justify-center gap-1"
+              >
+                <ExternalLink className="w-3 h-3 text-emerald-600" />
+                <span>Abrir Google Drive Compartido</span>
+              </a>
+            </div>
+
+            {/* Method 4: Git & Developer Token */}
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs space-y-2 flex flex-col justify-between">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full uppercase">
+                    Método 4 (Token TLM)
+                  </span>
+                  <KeyRound className="w-4 h-4 text-[#e64519]" />
+                </div>
+                <h4 className="font-bold text-slate-900 text-xs">Tokens Git & IDE</h4>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Cada correo registrado recibe un token confidencial para autenticarse en terminales de desarrollo, VS Code y la API REST interna.
+                </p>
+              </div>
+              <button
+                onClick={() => setIsInviteDevModalOpen(true)}
+                className="w-full text-center py-1.5 px-2 bg-purple-50 hover:bg-purple-100 text-purple-800 font-bold text-[10px] rounded-lg cursor-pointer transition flex items-center justify-center gap-1"
+              >
+                <KeyRound className="w-3 h-3 text-purple-600" />
+                <span>Generar Token para Correo</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Table: Authorized Developer Emails */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Code2 className="w-4 h-4 text-[#271a82]" />
+                <h4 className="text-xs font-bold uppercase text-slate-800 tracking-wider">
+                  Correos con Permisos para Editar Código ({desarrolladores.length})
+                </h4>
+              </div>
+              <button
+                onClick={() => setIsInviteDevModalOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-[#271a82] hover:bg-[#1c1343] text-white font-bold text-xs shadow-xs transition cursor-pointer flex items-center gap-1.5 active:scale-95 self-start sm:self-auto"
+              >
+                <UserPlus className="w-3.5 h-3.5 text-[#fa9d1c]" />
+                <span>Agregar Correo de Desarrollador</span>
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-[#f8f9fa] text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                    <th className="py-3 px-4">Desarrollador / Correo</th>
+                    <th className="py-3 px-3">Rol Técnico</th>
+                    <th className="py-3 px-3">Permisos de Código</th>
+                    <th className="py-3 px-3">Token Git / IDE</th>
+                    <th className="py-3 px-3">Estado</th>
+                    <th className="py-3 px-4 text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs">
+                  {desarrolladores.map((dev) => {
+                    const isOwner = dev.email.toLowerCase() === 'automatizaciones@tlm.net.co';
+                    const isCopied = copiedTokenId === dev.id;
+
+                    return (
+                      <tr key={dev.id} className="hover:bg-slate-50 transition">
+                        {/* Colaborador / Correo */}
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#1c1343] to-[#271a82] text-white flex items-center justify-center font-black text-xs shrink-0 shadow-2xs">
+                              {getCleanInitials(dev.nombre)}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                                <span className="truncate">{dev.nombre}</span>
+                                {isOwner && (
+                                  <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.2 rounded font-bold">
+                                    Propietario Maestro
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-slate-500 font-mono truncate select-all">
+                                {dev.email}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Rol Técnico */}
+                        <td className="py-3 px-3">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
+                            <Laptop className="w-3 h-3 text-indigo-600" />
+                            {dev.rol_tecnico}
+                          </span>
+                        </td>
+
+                        {/* Permisos de Código */}
+                        <td className="py-3 px-3">
+                          <div className="flex flex-wrap gap-1 max-w-[200px]">
+                            {dev.permisos_codigo.editar_codigo && (
+                              <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-bold rounded border border-emerald-200">
+                                ✓ Editar Código
+                              </span>
+                            )}
+                            {dev.permisos_codigo.hacer_commits_git && (
+                              <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold rounded border border-blue-200">
+                                ✓ Git Push
+                              </span>
+                            )}
+                            {dev.permisos_codigo.desplegar_cloud_run && (
+                              <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 text-[10px] font-bold rounded border border-purple-200">
+                                ✓ Cloud Run
+                              </span>
+                            )}
+                            {dev.permisos_codigo.acceso_google_drive && (
+                              <span className="px-1.5 py-0.5 bg-amber-50 text-amber-700 text-[10px] font-bold rounded border border-amber-200">
+                                ✓ Drive
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Token Git / IDE */}
+                        <td className="py-3 px-3 font-mono">
+                          <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-lg border border-slate-200 w-fit">
+                            <span className="text-[10px] text-slate-600">
+                              {dev.token_desarrollador.slice(0, 12)}...
+                            </span>
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(dev.token_desarrollador);
+                                setCopiedTokenId(dev.id);
+                                onShowToast?.(`Token copiado para ${dev.email}`);
+                                setTimeout(() => setCopiedTokenId(null), 2500);
+                              }}
+                              className="text-indigo-600 hover:text-indigo-900 cursor-pointer p-0.5"
+                              title="Copiar token"
+                            >
+                              {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                        </td>
+
+                        {/* Estado */}
+                        <td className="py-3 px-3">
+                          {dev.estado === 'ACTIVO' ? (
+                            <span className="inline-flex items-center gap-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg font-bold text-[10px]">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Activo
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-lg font-bold text-[10px]">
+                              <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span> Revocado
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Acciones */}
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* Copiar comando gcloud personalizado */}
+                            <button
+                              onClick={() => {
+                                const cmd = `gcloud projects add-iam-policy-binding 395382435000 --member="user:${dev.email}" --role="roles/editor"`;
+                                navigator.clipboard.writeText(cmd);
+                                onShowToast?.(`Comando gcloud para ${dev.email} copiado`);
+                              }}
+                              title="Copiar comando gcloud para otorgar IAM a este correo"
+                              className="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-[11px] cursor-pointer flex items-center gap-1"
+                            >
+                              <Terminal className="w-3 h-3" />
+                              <span className="hidden sm:inline">gcloud</span>
+                            </button>
+
+                            {/* Regenerar Token */}
+                            <button
+                              onClick={() => handleRegenerarToken(dev.id)}
+                              title="Regenerar token confidencial"
+                              className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] cursor-pointer"
+                            >
+                              <RefreshCw className="w-3 h-3 text-slate-600" />
+                            </button>
+
+                            {/* Revocar Acceso */}
+                            {!isOwner && (
+                              <button
+                                onClick={() => handleRevocarDesarrollador(dev.id, dev.email)}
+                                title="Revocar permiso de edición"
+                                className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold text-[11px] cursor-pointer"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Terminal Box: Comandos Rápidos para Desarrolladores */}
+          <div className="bg-slate-900 text-slate-200 rounded-2xl p-5 border border-slate-800 space-y-3 font-mono text-xs">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div className="flex items-center gap-2 text-[#fa9d1c] font-bold">
+                <Terminal className="w-4 h-4 text-[#fa9d1c]" />
+                <span>Instrucciones para que los nuevos correos comiencen a trabajar</span>
+              </div>
+              <span className="text-[10px] text-slate-400">Bash / Git / Cloud Shell</span>
+            </div>
+
+            <div className="space-y-2 text-slate-300">
+              <div className="text-slate-400"># 1. El colaborador clona o descarga el proyecto con su token autorizado</div>
+              <div className="bg-slate-950 p-2.5 rounded-lg text-emerald-400 selection:bg-emerald-800">
+                git clone https://ais-pre-jm2qqpvuit56ogjeno6hay-395382435000.us-east1.run.app/repo.git
+              </div>
+
+              <div className="text-slate-400"># 2. Configurar la identidad git corporativa del colaborador</div>
+              <div className="bg-slate-950 p-2.5 rounded-lg text-emerald-400 selection:bg-emerald-800">
+                git config user.email "TU_CORREO@tlm.net.co"
+              </div>
+
+              <div className="text-slate-400"># 3. Autenticarse con Google Cloud SDK para desplegar revisiones</div>
+              <div className="bg-slate-950 p-2.5 rounded-lg text-emerald-400 selection:bg-emerald-800">
+                gcloud auth login TU_CORREO@tlm.net.co && gcloud config set project 395382435000
+              </div>
+
+              <div className="text-slate-400"># 4. Probar y compilar localmente antes de hacer push</div>
+              <div className="bg-slate-950 p-2.5 rounded-lg text-emerald-400 selection:bg-emerald-800">
+                npm install && npm run build && npm run dev
               </div>
             </div>
           </div>
@@ -1931,6 +3029,93 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
                 className="px-5 py-2 rounded-xl bg-[#271a82] hover:bg-[#1c1343] text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer"
               >
                 Guardar Permisos en Disco
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIGURAR CARPETA GOOGLE DRIVE */}
+      {isConfiguringDrive && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="p-5 bg-gradient-to-r from-[#0f4c81] to-[#1a73e8] text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center">
+                  <GoogleDriveIcon className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm">Vincular Carpeta de Google Drive</h3>
+                  <p className="text-[11px] text-emerald-100">Repositorio de Archivos & Facturas de Juan Yaya</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsConfiguringDrive(false)}
+                className="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Form */}
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  URL o Enlace de la Carpeta de Google Drive
+                </label>
+                <input
+                  type="text"
+                  value={driveFolderUrlInput}
+                  onChange={(e) => setDriveFolderUrlInput(e.target.value)}
+                  placeholder="https://drive.google.com/drive/folders/..."
+                  className="w-full bg-[#f8f9fa] border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 font-mono focus:outline-none focus:border-[#1a73e8]"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Pega aquí el enlace compartido de tu Google Drive donde tienes los XMLs o backups de base de datos.
+                </span>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Cuenta Corporativa de Google Propietaria
+                </label>
+                <input
+                  type="email"
+                  value={driveAccountInput}
+                  onChange={(e) => setDriveAccountInput(e.target.value)}
+                  placeholder="automatizaciones@tlm.net.co"
+                  className="w-full bg-[#f8f9fa] border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 font-mono focus:outline-none focus:border-[#1a73e8]"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Cuenta Google Workspace autorizada con permisos de lectura y escritura.
+                </span>
+              </div>
+
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 space-y-1">
+                <div className="font-bold flex items-center gap-1.5">
+                  <CheckCircle className="w-3.5 h-3.5 text-blue-600" />
+                  Sincronización Bidireccional Activa
+                </div>
+                <p className="text-[11px] text-blue-700">
+                  Las facturas procesadas y el archivo snapshot <code>repositorio_juan_version_2.0.json</code> se sincronizan de forma segura con la carpeta especificada.
+                </p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setIsConfiguringDrive(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveDriveConfig}
+                className="px-5 py-2 rounded-xl bg-[#0f4c81] hover:bg-[#1a73e8] text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer"
+              >
+                Guardar y Conectar
               </button>
             </div>
           </div>
