@@ -192,14 +192,14 @@ export interface ModificacionRepositorio {
   timestamp: string;
   autor_id: number;
   autor_nombre: string;
-  autor_email: string;
-  autor_rol: string;
-  tipo_accion: 'FACTURA_UPDATE' | 'FACTURA_AUDITADA' | 'CONCILIACION' | 'PUC_UPDATE' | 'CONFIG_UPDATE' | 'COLABORACION' | 'RELEASE_V2' | 'GCP_SYNC';
+  autor_email?: string;
+  autor_rol?: string;
+  tipo_accion: 'FACTURA_UPDATE' | 'FACTURA_AUDITADA' | 'CONCILIACION' | 'PUC_UPDATE' | 'CONFIG_UPDATE' | 'COLABORACION' | 'RELEASE_V2' | 'GCP_SYNC' | string;
   descripcion: string;
   detalles?: string;
-  version_destino: string; // "v2.0"
-  repositorio: string; // "Repositorio Maestro de Juan Yaya"
-  hash_commit: string;
+  version_destino?: string; // "v2.0"
+  repositorio?: string; // "Repositorio Maestro de Juan Yaya"
+  hash_commit?: string;
 }
 
 export interface RepositorioInfo {

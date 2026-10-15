@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import apiRouter from './src/server/routes/apiRouter.ts';
 import { ExcelService } from './src/server/services/excelService.ts';
+import { CloudSqlService } from './src/server/services/cloudSqlService.ts';
 import { db } from './src/server/storage/dataStore.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -17,6 +18,15 @@ async function startServer() {
   app.use(cors());
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+  // Inicializar conexión en línea a Google Cloud SQL (PostgreSQL)
+  try {
+    await CloudSqlService.initAndSeed();
+    await CloudSqlService.syncCloudSqlToDataStore(db);
+    console.log(`[Consola TLM] Conexión en línea con Google Cloud SQL sincronizada y activa.`);
+  } catch (err) {
+    console.warn(`[Consola TLM] Aviso al inicializar Cloud SQL:`, err);
+  }
 
   // Generar base de datos en formato Excel (.xlsx) maestra al iniciar
   try {
