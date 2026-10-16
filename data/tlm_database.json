@@ -171,29 +171,7 @@
     }
   ],
   "facturas": [
-    {
-      "id_factura": 1791898676706,
-      "id_empresa": 1,
-      "factura_num": "DRV-3435",
-      "fecha": "2026-10-13",
-      "proveedor": "GOOGLE CLOUD & WORKSPACE IRELAND LTD",
-      "nit_tercero": "900987654",
-      "descripcion_item": "Suscripción Enterprise Google Workspace Drive + Cloud Storage (30 Usuarios)",
-      "cantidad": 1,
-      "valor_unitario": 1450000,
-      "subtotal": 1450000,
-      "iva": 275500,
-      "retencion_porc": 4,
-      "retencion_valor": 58000,
-      "casilla_350": 62,
-      "forma_pago": "Crédito 30 días",
-      "medio_pago": "Transferencia Electrónica",
-      "cuenta_gasto": "51353501 - Servicios de Tecnología & Nube",
-      "tipo_comprobante": "Factura Electrónica de Venta",
-      "cufe_hash": "cufe-drv-5a8af0a2ec8f9",
-      "estado_revision": "AUDITADA",
-      "fecha_cargue": "2026-10-13T13:37:56.706Z"
-    },
+    
     {
       "id_factura": 1,
       "id_empresa": 1,

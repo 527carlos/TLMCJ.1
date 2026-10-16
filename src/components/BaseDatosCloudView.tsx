@@ -88,7 +88,43 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
   const [tableSearchQuery, setTableSearchQuery] = useState<string>('');
   const [isMigrating, setIsMigrating] = useState<boolean>(false);
   const [migrationResult, setMigrationResult] = useState<any | null>(null);
-  const [activeTab, setActiveTab] = useState<'explorador' | 'migracion' | 'sql' | 'gestiones'>('explorador');
+  const [activeTab, setActiveTab] = useState<'explorador' | 'gestiones' | 'conexion-externa' | 'migracion' | 'sql'>('explorador');
+  const [testingExternal, setTestingExternal] = useState<boolean>(false);
+  const [externalTestResult, setExternalTestResult] = useState<any | null>(null);
+
+  const handleTestExternal = async () => {
+    setTestingExternal(true);
+    setExternalTestResult(null);
+    try {
+      const res = await fetch('/api/v1/sistema/probar-conexion-sql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host: '34.175.144.94',
+          port: 5432,
+          database: 'postgres',
+          user: 'postgres',
+          password: 'Tlmcj0510*'
+        })
+      });
+      const resData = await res.json();
+      setExternalTestResult(resData);
+      if (resData.ok) {
+        onShowToast('¡Conexión verificada exitosamente a 34.175.144.94!', 'success');
+      } else {
+        onShowToast(resData.mensaje || 'Información de conexión a Cloud SQL', 'error');
+      }
+    } catch (e: any) {
+      setExternalTestResult({
+        ok: false,
+        mensaje: 'Error de red probando conexión',
+        error_detalle: e.message
+      });
+      onShowToast('Error probando conexión a Cloud SQL', 'error');
+    } finally {
+      setTestingExternal(false);
+    }
+  };
 
   const loadDatabaseOverview = async () => {
     setLoading(true);
@@ -337,6 +373,19 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
         >
           <Table className="w-4 h-4" />
           <span>Explorador de Tablas ({data?.tablas.length || 8})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('conexion-externa')}
+          className={`pb-3 px-4 text-xs font-bold transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
+            activeTab === 'conexion-externa'
+              ? 'border-[#271a82] text-[#271a82]'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Server className="w-4 h-4 text-indigo-600" />
+          <span>Instancia Externa (34.175.144.94)</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-indigo-100 text-indigo-800">5432</span>
         </button>
 
         <button

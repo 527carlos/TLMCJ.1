@@ -1034,6 +1034,56 @@ router.get('/sistema/database-overview', async (_req: Request, res: Response) =>
   }
 });
 
+// Probar conexión directa a instancia externa de PostgreSQL / Cloud SQL
+router.post('/sistema/probar-conexion-sql', async (req: Request, res: Response) => {
+  const { host, port, database, user, password, ssl } = req.body;
+  const targetHost = host || process.env.SQL_HOST || '34.175.144.94';
+  const targetPort = port ? parseInt(port, 10) : (process.env.SQL_PORT ? parseInt(process.env.SQL_PORT, 10) : 5432);
+  const targetDb = database || process.env.SQL_DB_NAME || 'postgres';
+  const targetUser = user || process.env.SQL_USER || 'postgres';
+  const targetPassword = password || process.env.SQL_PASSWORD || 'Tlmcj0510*';
+  const useSsl = ssl === true || ssl === 'true' || process.env.SQL_SSL === 'true';
+
+  const isSocket = targetHost.startsWith('/');
+  const { Pool } = await import('pg');
+  const testPool = new Pool({
+    host: targetHost,
+    port: isSocket ? undefined : targetPort,
+    database: targetDb,
+    user: targetUser,
+    password: targetPassword,
+    connectionTimeoutMillis: 5000,
+    ssl: !isSocket && useSsl ? { rejectUnauthorized: false } : false
+  });
+
+  try {
+    const start = Date.now();
+    const result = await testPool.query('SELECT current_database() as db, current_user as usr, version() as ver');
+    const latency = Date.now() - start;
+    await testPool.end();
+    return res.json({
+      ok: true,
+      mensaje: `¡Conexión exitosa a Google Cloud SQL en ${targetHost}:${targetPort}!`,
+      base_datos: result.rows[0]?.db,
+      usuario: result.rows[0]?.usr,
+      version: result.rows[0]?.ver,
+      latencia_ms: latency,
+      host: targetHost,
+      puerto: targetPort
+    });
+  } catch (err: any) {
+    try { await testPool.end(); } catch (_) {}
+    return res.json({
+      ok: false,
+      mensaje: `No se pudo conectar a PostgreSQL en ${targetHost}:${targetPort}`,
+      error_detalle: err.message || 'Timeout de conexión',
+      instruccion: `En Google Cloud Console (Cloud SQL > Instancia > Conexiones > Redes autorizadas), agrega la red '0.0.0.0/0' para permitir conexiones públicas a la IP ${targetHost}.`,
+      host: targetHost,
+      puerto: targetPort
+    });
+  }
+});
+
 // Exportar DDL y DML completo para Google Cloud SQL / PostgreSQL
 router.get('/sistema/export-sql', (_req: Request, res: Response) => {
   try {

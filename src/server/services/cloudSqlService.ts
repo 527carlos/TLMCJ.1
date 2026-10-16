@@ -989,17 +989,17 @@ export class CloudSqlService {
 
       return {
         app_url: "https://consola-tlm-enterprise-fiscal-erp-engine.ai.studio",
-        cloud_host: "Google Cloud SQL (PostgreSQL 18.6) + Cloud Run (us-east1)",
+        cloud_host: process.env.SQL_HOST ? `Google Cloud SQL (${process.env.SQL_HOST}:${process.env.SQL_PORT || 5432})` : "34.175.144.94:5432",
         cloud_project: "peak-sunset-511516-q7",
         cloud_region: "us-east1",
-        cloud_user: "automatizaciones@tlm.net.co (Juan Yaya)",
+        cloud_user: process.env.SQL_USER || "postgres",
         estado: online ? "EN_LINEA_ACTIVO" : "OFFLINE",
-        motor: "Google Cloud SQL Developer Edition (PostgreSQL 18.6 Managed)",
+        motor: "Google Cloud SQL (PostgreSQL Managed)",
         version: "2.0.0",
         propietario: "Juan Yaya - Administrador Maestro (automatizaciones@tlm.net.co)",
         persistencia: {
-          tipo: "Relacional PostgreSQL Online Transaccional ACID + Cloud SQL Auth Proxy",
-          archivo: "peak-sunset-511516-q7/ai-studio-8e7c59f0",
+          tipo: "Relacional PostgreSQL Online Transaccional ACID",
+          archivo: process.env.SQL_DB_NAME || "postgres",
           tamano_bytes: 1048576,
           tamano_legible: "Cloud SQL Managed Storage",
           activo_en_disco: true
