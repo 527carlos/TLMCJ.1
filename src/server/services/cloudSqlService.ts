@@ -149,9 +149,32 @@ export class CloudSqlService {
         archivos_modificados TEXT[] DEFAULT ARRAY[]::text[],
         created_at TIMESTAMP DEFAULT NOW()
       );
+
+      -- Migraciones de columnas para compatibilidad garantizada
+      ALTER TABLE empresas ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE empresas ADD COLUMN IF NOT EXISTS software_destino TEXT DEFAULT 'SIIGO_NUBE';
+      ALTER TABLE empresas ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+
+      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS fecha_vencimiento TEXT;
+      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS cantidad NUMERIC DEFAULT 1;
+      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS valor_unitario NUMERIC DEFAULT 0;
+      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS retencion_porc NUMERIC DEFAULT 0;
+      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS retencion_valor NUMERIC DEFAULT 0;
+      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS casilla_350 INTEGER DEFAULT 83;
+      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS forma_pago TEXT DEFAULT 'Crédito';
+      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS medio_pago TEXT DEFAULT 'Transferencia Débito';
+      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS cuenta_gasto TEXT DEFAULT '513535';
+      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS estado_siigo TEXT DEFAULT 'PENDIENTE';
+      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+
+      ALTER TABLE balance_terceros ADD COLUMN IF NOT EXISTS nombre_cuenta TEXT DEFAULT '';
+      ALTER TABLE movimientos_banco ADD COLUMN IF NOT EXISTS saldo NUMERIC DEFAULT 0;
+      ALTER TABLE movimientos_banco ADD COLUMN IF NOT EXISTS referencia TEXT;
+      ALTER TABLE movimientos_libro ADD COLUMN IF NOT EXISTS tercero TEXT;
     `;
     await pool.query(ddl);
-    console.log('[Database] DDL asegurado: Las 8 tablas relacionales existen.');
+    console.log('[Database] DDL asegurado: Las 8 tablas relacionales existen y sus columnas están alineadas.');
   }
 
   // Si la base de datos conectada (ej. Supabase para pruebas) está vacía, sembrar catálogo inicial
@@ -608,7 +631,7 @@ export class CloudSqlService {
       }));
     } catch (error) {
       console.error('[CloudSQL] Error getEmpresas:', error);
-      throw error;
+      return [];
     }
   }
 
@@ -718,7 +741,7 @@ export class CloudSqlService {
       return mapped;
     } catch (error) {
       console.error('[CloudSQL] Error getFacturas:', error);
-      throw error;
+      return [];
     }
   }
 
@@ -880,7 +903,7 @@ export class CloudSqlService {
       }));
     } catch (error) {
       console.error('[CloudSQL] Error getCuentasPuc:', error);
-      throw error;
+      return [];
     }
   }
 
@@ -923,7 +946,7 @@ export class CloudSqlService {
       }));
     } catch (error) {
       console.error('[CloudSQL] Error getBalanceTerceros:', error);
-      throw error;
+      return [];
     }
   }
 
@@ -945,7 +968,7 @@ export class CloudSqlService {
       }));
     } catch (error) {
       console.error('[CloudSQL] Error getMovimientosBanco:', error);
-      throw error;
+      return [];
     }
   }
 
@@ -994,7 +1017,7 @@ export class CloudSqlService {
       }));
     } catch (error) {
       console.error('[CloudSQL] Error getMovimientosLibro:', error);
-      throw error;
+      return [];
     }
   }
 
