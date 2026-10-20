@@ -583,6 +583,36 @@ describe('coherencia contable', () => {
   });
 });
 
+describe('arranque en producción', () => {
+  const storeFile = path.join(import.meta.dir, '../src/server/storage/dataStore.ts');
+  const script = `(async () => {
+    const { db } = await import(${JSON.stringify(storeFile)});
+    await db.ready;
+    console.log('USUARIOS=' + JSON.stringify(db.usuarios.map(u => u.email)));
+    console.log('FACTURAS=' + db.facturas.length);
+  })().catch(e => { console.error(e.message); process.exit(1); });`;
+
+  const correrEnProduccion = (extra: Record<string, string>) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tlm-prod-'));
+    const env = { ...process.env, NODE_ENV: 'production', DATABASE_URL: '', ADMIN_PASSWORD: '', ADMIN_EMAIL: '', ...extra };
+    return Bun.spawnSync(['bun', '-e', script], { cwd: dir, env });
+  };
+
+  test('sin ADMIN_PASSWORD no arranca y explica qué falta', () => {
+    const r = correrEnProduccion({});
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr.toString()).toContain('ADMIN_PASSWORD');
+  });
+
+  test('con ADMIN_PASSWORD solo existe el administrador, sin cuentas de demostración', () => {
+    const r = correrEnProduccion({ ADMIN_PASSWORD: 'Admin2026x', ADMIN_EMAIL: 'Jefe@TLM.net.co' });
+    expect(r.exitCode).toBe(0);
+    const linea = r.stdout.toString().split('\n').find(l => l.startsWith('USUARIOS='))!;
+    expect(JSON.parse(linea.slice('USUARIOS='.length))).toEqual(['jefe@tlm.net.co']);
+    expect(r.stdout.toString()).toContain('FACTURAS=0');
+  });
+});
+
 // Va al final: bloquea la IP de pruebas para todos los inicios de sesión posteriores
 describe('límite por IP', () => {
   test('muchos fallos desde una misma IP bloquean el inicio de sesión', async () => {

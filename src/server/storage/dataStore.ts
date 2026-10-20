@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { Usuario, PermisosUsuario, Empresa, Factura, CuentaPUC, BalanceTercero, MovimientoBancario, MovimientoLibro, ModificacionRepositorio, RepositorioInfo, NotificacionSeguridad } from '../domain/types.ts';
 import { createPostgresStore } from './postgresStore.ts';
+import { hashPassword } from '../services/passwordHasher.ts';
 
 export function getDefaultPermissions(rol: 'Administrador' | 'Contador' | 'Analista' | 'Auditor'): PermisosUsuario {
   switch (rol) {
@@ -82,9 +83,37 @@ class DataStore {
       }
     } else {
       this.initSeedData();
+      // En producción no se crean las cuentas de demostración (sus claves están en el código).
+      // Solo se crea el administrador inicial, con la clave que define el hosting.
+      // y se quitan las facturas y movimientos de demostración. Empresas y PUC se mantienen.
+      if (process.env.NODE_ENV === 'production') {
+        this.usuarios = [this.adminInicialProduccion()];
+        this.facturas = [];
+        this.movimientosBanco = [];
+        this.movimientosLibro = [];
+        this.balanceTerceros = [];
+      }
       this.saveToDisk();
     }
     await this.writeQueue;
+  }
+
+  private adminInicialProduccion(): Usuario {
+    const password = process.env.ADMIN_PASSWORD || '';
+    if (password.length < 8) {
+      throw new Error('Falta ADMIN_PASSWORD (mínimo 8 caracteres). Defínela en el hosting antes del primer arranque en producción.');
+    }
+    return {
+      id_usuario: 1,
+      nombre_completo: 'Juan Yaya - Administrador Maestro',
+      email: (process.env.ADMIN_EMAIL || 'automatizaciones@tlm.net.co').toLowerCase().trim(),
+      hashed_password: hashPassword(password),
+      rol: 'Administrador',
+      activo: true,
+      requiere_cambio_password: false,
+      empresas_ids: [1, 2],
+      permisos: getDefaultPermissions('Administrador')
+    };
   }
 
   private readDumpFromFile(): any | null {
