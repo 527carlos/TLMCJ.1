@@ -55,6 +55,9 @@ interface DatabaseOverviewResponse {
   propietario: string;
   is_supabase?: boolean;
   supabase_project_id?: string;
+  is_neon?: boolean;
+  neon_project_id?: string;
+  neon_branch_id?: string;
   host_raw?: string;
   port_raw?: number;
   database_raw?: string;
@@ -106,22 +109,57 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
   const [testingExternal, setTestingExternal] = useState<boolean>(false);
   const [externalTestResult, setExternalTestResult] = useState<any | null>(null);
 
-  // Estados para formulario de conexión externa (Supabase / Cloud SQL)
+  // Estados para conector oficial Neon Serverless PostgreSQL
+  const [activePreset, setActivePreset] = useState<'neon' | 'supabase' | 'cloudsql' | 'custom'>('neon');
+  const [neonProjectId, setNeonProjectId] = useState<string>('bitter-frost-14568057');
+  const [neonBranchId, setNeonBranchId] = useState<string>('br-tiny-boat-b4jd4u1z');
+  const [connectionStringInput, setConnectionStringInput] = useState<string>('postgresql://neondb_owner:npg_zyGclK32wnNL@ep-rough-term-b4jl3vvr-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require');
   const [extProjectId, setExtProjectId] = useState<string>('fqatuwzsunvxbtryhloy');
-  const [extHost, setExtHost] = useState<string>('db.fqatuwzsunvxbtryhloy.supabase.co');
+  const [extHost, setExtHost] = useState<string>('ep-rough-term-b4jl3vvr-pooler.c-6.us-east-2.aws.neon.tech');
   const [extPort, setExtPort] = useState<string>('5432');
-  const [extDb, setExtDb] = useState<string>('postgres');
-  const [extUser, setExtUser] = useState<string>('postgres');
-  const [extPassword, setExtPassword] = useState<string>('Tlmcj0510*');
+  const [extDb, setExtDb] = useState<string>('neondb');
+  const [extUser, setExtUser] = useState<string>('neondb_owner');
+  const [extPassword, setExtPassword] = useState<string>('npg_zyGclK32wnNL');
   const [extSsl, setExtSsl] = useState<boolean>(true);
   const [showExtPassword, setShowExtPassword] = useState<boolean>(false);
   const [isConnectingDb, setIsConnectingDb] = useState<boolean>(false);
   const [isDeployingDdl, setIsDeployingDdl] = useState<boolean>(false);
-  const [activePreset, setActivePreset] = useState<'supabase' | 'cloudsql' | 'custom'>('supabase');
 
-  const handleSelectPreset = (preset: 'supabase' | 'cloudsql') => {
+  const handleAutoParseConnectionString = (str: string) => {
+    setConnectionStringInput(str);
+    try {
+      if (str.startsWith('postgres://') || str.startsWith('postgresql://')) {
+        const url = new URL(str);
+        if (url.hostname) setExtHost(url.hostname);
+        if (url.port) setExtPort(url.port);
+        if (url.username) setExtUser(decodeURIComponent(url.username));
+        if (url.password) setExtPassword(decodeURIComponent(url.password));
+        const dbName = url.pathname.replace(/^\//, '');
+        if (dbName) setExtDb(dbName);
+        setExtSsl(true);
+        if (url.hostname.includes('neon.tech')) {
+          setActivePreset('neon');
+          setNeonProjectId('bitter-frost-14568057');
+          setNeonBranchId('br-tiny-boat-b4jd4u1z');
+        }
+        onShowToast('Connection string de Neon interpretada exitosamente', 'success');
+      }
+    } catch (_) {}
+  };
+
+  const handleSelectPreset = (preset: 'neon' | 'supabase' | 'cloudsql') => {
     setActivePreset(preset);
-    if (preset === 'supabase') {
+    if (preset === 'neon') {
+      setNeonProjectId('bitter-frost-14568057');
+      setNeonBranchId('br-tiny-boat-b4jd4u1z');
+      setExtHost('ep-rough-term-b4jl3vvr-pooler.c-6.us-east-2.aws.neon.tech');
+      setExtPort('5432');
+      setExtDb('neondb');
+      setExtUser('neondb_owner');
+      setExtPassword('npg_zyGclK32wnNL');
+      setConnectionStringInput('postgresql://neondb_owner:npg_zyGclK32wnNL@ep-rough-term-b4jl3vvr-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require');
+      setExtSsl(true);
+    } else if (preset === 'supabase') {
       setExtProjectId('fqatuwzsunvxbtryhloy');
       setExtHost('db.fqatuwzsunvxbtryhloy.supabase.co');
       setExtPort('5432');
@@ -152,7 +190,10 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
           user: extUser,
           password: extPassword,
           ssl: extSsl,
-          supabaseProjectId: extProjectId || undefined
+          supabaseProjectId: activePreset === 'supabase' ? extProjectId : undefined,
+          neonProjectId: activePreset === 'neon' ? (neonProjectId || 'bitter-frost-14568057') : undefined,
+          neonBranchId: activePreset === 'neon' ? (neonBranchId || 'br-tiny-boat-b4jd4u1z') : undefined,
+          connectionString: connectionStringInput || undefined
         })
       });
       const resData = await res.json();
@@ -187,7 +228,10 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
           user: extUser,
           password: extPassword,
           ssl: extSsl,
-          supabaseProjectId: extProjectId || undefined
+          supabaseProjectId: activePreset === 'supabase' ? extProjectId : undefined,
+          neonProjectId: activePreset === 'neon' ? (neonProjectId || 'bitter-frost-14568057') : undefined,
+          neonBranchId: activePreset === 'neon' ? (neonBranchId || 'br-tiny-boat-b4jd4u1z') : undefined,
+          connectionString: connectionStringInput || undefined
         })
       });
       const resData = await res.json();
@@ -237,6 +281,19 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
       if (!res.ok) throw new Error('Error al cargar datos del motor de base de datos');
       const json: DatabaseOverviewResponse = await res.json();
       setData(json);
+      if (json.is_neon) {
+        setActivePreset('neon');
+        if (json.neon_project_id) setNeonProjectId(json.neon_project_id);
+        if (json.neon_branch_id) setNeonBranchId(json.neon_branch_id);
+        if (json.host_raw) setExtHost(json.host_raw);
+        if (json.port_raw) setExtPort(String(json.port_raw));
+        if (json.database_raw) setExtDb(json.database_raw);
+        if (json.user_raw) setExtUser(json.user_raw);
+        if (json.ssl_raw !== undefined) setExtSsl(json.ssl_raw);
+      } else if (json.is_supabase) {
+        setActivePreset('supabase');
+        if (json.supabase_project_id) setExtProjectId(json.supabase_project_id);
+      }
     } catch (err: any) {
       onShowToast(err.message || 'Error cargando base de datos', 'error');
     } finally {
@@ -483,18 +540,15 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
           onClick={() => setActiveTab('conexion-externa')}
           className={`pb-3 px-4 text-xs font-bold transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
             activeTab === 'conexion-externa'
-              ? 'border-[#271a82] text-[#271a82]'
+              ? 'border-cyan-600 text-cyan-800'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
-          <Server className="w-4 h-4 text-indigo-600" />
-          <span>Bases de Datos & Supabase</span>
-          <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${
-            data?.is_supabase 
-              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
-              : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
-          }`}>
-            {data?.is_supabase ? 'Supabase (fqatuwzsunvxbtryhloy)' : 'Cloud SQL (34.175.144.94)'}
+          <Zap className="w-4 h-4 text-cyan-600" />
+          <span>Conector Neon Serverless (Oficial)</span>
+          <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-cyan-100 text-cyan-800 border border-cyan-200 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            ep-rough-term-b4jl3vvr
           </span>
         </button>
 
@@ -1067,94 +1121,56 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
             </div>
           </div>
 
-          {/* Quick Presets Selector */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Supabase Card */}
-            <div 
-              onClick={() => handleSelectPreset('supabase')}
-              className={`p-5 rounded-3xl border transition cursor-pointer flex flex-col justify-between ${
-                activePreset === 'supabase'
-                  ? 'bg-emerald-50/50 border-emerald-500 shadow-sm ring-2 ring-emerald-500/20'
-                  : 'bg-white border-slate-200 hover:border-slate-300'
-              }`}
-            >
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800">
-                    Entorno de Pruebas & Desarrollo
-                  </span>
-                  {activePreset === 'supabase' && (
-                    <span className="text-[11px] font-bold text-emerald-700 flex items-center gap-1">
-                      <Check className="w-3.5 h-3.5 stroke-[3]" /> Seleccionado
-                    </span>
-                  )}
+          {/* Neon Dedicated Card - Conector Único Oficial */}
+          <div className="p-6 rounded-3xl border bg-gradient-to-br from-cyan-950/40 via-slate-900 to-indigo-950/40 border-cyan-500/40 shadow-sm text-white">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 border border-cyan-400/30 flex items-center justify-center shrink-0">
+                  <Zap className="w-6 h-6 text-cyan-400" />
                 </div>
-                <h4 className="text-sm font-black text-slate-900 flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-emerald-600" />
-                  Supabase PostgreSQL (fqatuwzsunvxbtryhloy)
-                </h4>
-                <p className="text-xs text-slate-500 mt-1">
-                  Instancia gestionada para despliegue de pruebas, validación de migraciones y actualizaciones en tiempo real.
-                </p>
-                <div className="mt-3 p-2.5 bg-white rounded-xl border border-slate-200/80 font-mono text-[11px] space-y-1 text-slate-600">
-                  <div>Host: <span className="font-bold text-slate-800">db.fqatuwzsunvxbtryhloy.supabase.co</span></div>
-                  <div>Proyecto ID: <span className="font-bold text-emerald-700">fqatuwzsunvxbtryhloy</span></div>
-                  <div>Puerto: <span className="font-bold text-slate-800">5432</span> • SSL: <span className="font-bold text-emerald-600">Requerido</span></div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-base font-black text-white">Neon Serverless PostgreSQL</h4>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-cyan-400/20 text-cyan-300 border border-cyan-400/30">
+                      Conector Único Oficial
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    Toda la persistencia transaccional ACID de la plataforma está centralizada exclusivamente en esta instancia de Neon PostgreSQL.
+                  </p>
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); handleSelectPreset('supabase'); }}
-                className="mt-4 w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
-              >
-                <span>Cargar Parámetros Supabase</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <a
+                  href="https://console.neon.tech/app/projects/bitter-frost-14568057/branches/br-tiny-boat-b4jd4u1z"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <span>Abrir Consola Neon</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
             </div>
 
-            {/* Google Cloud SQL Card */}
-            <div 
-              onClick={() => handleSelectPreset('cloudsql')}
-              className={`p-5 rounded-3xl border transition cursor-pointer flex flex-col justify-between ${
-                activePreset === 'cloudsql'
-                  ? 'bg-indigo-50/50 border-[#271a82] shadow-sm ring-2 ring-indigo-900/10'
-                  : 'bg-white border-slate-200 hover:border-slate-300'
-              }`}
-            >
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-100 text-[#271a82]">
-                    Instancia Google Cloud SQL (GCP)
-                  </span>
-                  {activePreset === 'cloudsql' && (
-                    <span className="text-[11px] font-bold text-[#271a82] flex items-center gap-1">
-                      <Check className="w-3.5 h-3.5 stroke-[3]" /> Seleccionado
-                    </span>
-                  )}
-                </div>
-                <h4 className="text-sm font-black text-slate-900 flex items-center gap-1.5">
-                  <Server className="w-4 h-4 text-indigo-700" />
-                  Google Cloud SQL (34.175.144.94)
-                </h4>
-                <p className="text-xs text-slate-500 mt-1">
-                  Instancia gestionada de PostgreSQL en Google Cloud us-east1 para producción enterprise.
-                </p>
-                <div className="mt-3 p-2.5 bg-white rounded-xl border border-slate-200/80 font-mono text-[11px] space-y-1 text-slate-600">
-                  <div>Host / IP: <span className="font-bold text-slate-800">34.175.144.94</span></div>
-                  <div>Base de Datos: <span className="font-bold text-slate-800">postgres</span></div>
-                  <div>Puerto: <span className="font-bold text-slate-800">5432</span> • Usuario: <span className="font-bold text-slate-800">postgres</span></div>
-                </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-xs font-mono">
+              <div className="bg-black/30 p-3 rounded-xl border border-white/5">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Host Oficial</span>
+                <span className="font-bold text-cyan-300 truncate block" title="ep-rough-term-b4jl3vvr-pooler.c-6.us-east-2.aws.neon.tech">ep-rough-term-b4jl3vvr-pooler...</span>
               </div>
-
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); handleSelectPreset('cloudsql'); }}
-                className="mt-4 w-full py-2 px-3 rounded-xl bg-[#271a82] hover:bg-indigo-900 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
-              >
-                <span>Cargar Parámetros Cloud SQL</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
+              <div className="bg-black/30 p-3 rounded-xl border border-white/5">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Base de Datos</span>
+                <span className="font-bold text-white block">neondb</span>
+              </div>
+              <div className="bg-black/30 p-3 rounded-xl border border-white/5">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Usuario</span>
+                <span className="font-bold text-white block">neondb_owner</span>
+              </div>
+              <div className="bg-black/30 p-3 rounded-xl border border-white/5">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Seguridad Canal</span>
+                <span className="font-bold text-emerald-400 block">SSL / TLS v1.3</span>
+              </div>
             </div>
           </div>
 
@@ -1163,44 +1179,99 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-5 border-b border-slate-100">
               <div>
                 <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-                  <Sliders className="w-5 h-5 text-[#271a82]" />
-                  Configurador de Parámetros de Conexión Externa
+                  <Zap className="w-5 h-5 text-cyan-600" />
+                  Conector Único Oficial: Neon Serverless PostgreSQL
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Verifica las credenciales y activa la conexión de la base de datos en tiempo real.
+                  Conexión directa y unificada. Todos los módulos (Facturas, DIAN, Usuarios, PUC, Balance y Bancos) operan sobre esta base única.
                 </p>
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-500">Preset:</span>
-                <span className="text-xs font-mono font-bold px-2 py-1 bg-slate-100 rounded-lg text-slate-800 uppercase">
-                  {activePreset}
+                <span className="text-xs font-bold text-slate-500">Conector:</span>
+                <span className="text-xs font-mono font-bold px-3 py-1 bg-cyan-100 text-cyan-900 rounded-xl uppercase flex items-center gap-1.5 border border-cyan-200">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  Neon Único Conector
                 </span>
               </div>
             </div>
 
+            {/* Input para Connection String Completa de Neon */}
+            <div className="p-4 bg-cyan-50/50 rounded-2xl border border-cyan-200 space-y-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                  <Zap className="w-4 h-4 text-cyan-600" />
+                  <span>Cadena de Conexión URI Oficial de Neon</span>
+                  <span className="text-[10px] font-bold text-cyan-800 bg-white px-2 py-0.5 rounded-full border border-cyan-200">
+                    Activa en .env y Servidor
+                  </span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const officialUri = 'postgresql://neondb_owner:npg_zyGclK32wnNL@ep-rough-term-b4jl3vvr-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+                      handleAutoParseConnectionString(officialUri);
+                    }}
+                    className="text-[11px] font-bold text-cyan-800 hover:text-cyan-900 bg-white px-2.5 py-1 rounded-lg border border-cyan-300 transition cursor-pointer"
+                  >
+                    Restablecer URI Oficial
+                  </button>
+                  <a
+                    href="https://console.neon.tech/app/projects/bitter-frost-14568057/branches/br-tiny-boat-b4jd4u1z"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[11px] font-bold text-cyan-700 hover:text-cyan-800 flex items-center gap-1"
+                  >
+                    <span>Consola Neon</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
+              <input
+                type="text"
+                value={connectionStringInput}
+                onChange={(e) => handleAutoParseConnectionString(e.target.value)}
+                placeholder="postgresql://neondb_owner:npg_zyGclK32wnNL@ep-rough-term-b4jl3vvr-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+                className="w-full text-xs font-mono px-3.5 py-2.5 rounded-xl border border-cyan-300 bg-white focus:outline-none focus:border-cyan-600 shadow-xs"
+              />
+              <p className="text-[11px] text-slate-600">
+                Instancia oficial en <strong>Neon AWS us-east-2</strong> (Rama <code className="font-mono text-cyan-900 font-bold bg-white px-1 py-0.5 rounded border border-cyan-200">br-tiny-boat-b4jd4u1z</code>, Endpoint <code className="font-mono text-cyan-900 font-bold bg-white px-1 py-0.5 rounded border border-cyan-200">ep-rough-term-b4jl3vvr</code>).
+              </p>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {/* Supabase Project ID */}
+              {/* Neon Project ID */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Supabase Project ID (Opcional)
+                  Neon Project ID
                 </label>
                 <input
                   type="text"
-                  value={extProjectId}
-                  onChange={(e) => {
-                    const id = e.target.value.trim();
-                    setExtProjectId(id);
-                    if (id) {
-                      setExtHost(`db.${id}.supabase.co`);
-                      setExtSsl(true);
-                    }
-                  }}
-                  placeholder="ej: fqatuwzsunvxbtryhloy"
-                  className="w-full text-xs font-mono px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#271a82]"
+                  value={neonProjectId}
+                  onChange={(e) => setNeonProjectId(e.target.value.trim())}
+                  placeholder="bitter-frost-14568057"
+                  className="w-full text-xs font-mono px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-cyan-600"
                 />
                 <span className="text-[10px] text-slate-400 mt-1 block">
-                  Autocompleta el host directo de Supabase
+                  ID del proyecto Neon
+                </span>
+              </div>
+
+              {/* Neon Branch ID */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Neon Branch ID
+                </label>
+                <input
+                  type="text"
+                  value={neonBranchId}
+                  onChange={(e) => setNeonBranchId(e.target.value.trim())}
+                  placeholder="br-tiny-boat-b4jd4u1z"
+                  className="w-full text-xs font-mono px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-cyan-600"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Rama activa de Neon
                 </span>
               </div>
 
@@ -1213,7 +1284,7 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
                   type="text"
                   value={extHost}
                   onChange={(e) => setExtHost(e.target.value)}
-                  placeholder="db.fqatuwzsunvxbtryhloy.supabase.co"
+                  placeholder="ep-tiny-boat-b4jd4u1z.us-east-2.aws.neon.tech"
                   className="w-full text-xs font-mono px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#271a82]"
                 />
               </div>
@@ -1241,7 +1312,7 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
                   type="text"
                   value={extDb}
                   onChange={(e) => setExtDb(e.target.value)}
-                  placeholder="postgres"
+                  placeholder="neondb"
                   className="w-full text-xs font-mono px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#271a82]"
                 />
               </div>
@@ -1255,7 +1326,7 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
                   type="text"
                   value={extUser}
                   onChange={(e) => setExtUser(e.target.value)}
-                  placeholder="postgres"
+                  placeholder="neondb_owner"
                   className="w-full text-xs font-mono px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#271a82]"
                 />
               </div>

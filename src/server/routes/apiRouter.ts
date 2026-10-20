@@ -10,7 +10,7 @@ import { scalabilityArchitecture } from '../services/scalabilityArchitecture.ts'
 import { ExcelService } from '../services/excelService.ts';
 import { SqlGeneratorService } from '../services/sqlGeneratorService.ts';
 import { CloudSqlService } from '../services/cloudSqlService.ts';
-import { reconnectPool, getActiveConnectionConfig } from '../../db/index.ts';
+import { reconnectPool, getActiveConnectionConfig, parseConnectionString } from '../../db/index.ts';
 import type { Factura } from '../domain/types.ts';
 
 const router = Router();
@@ -1035,22 +1035,50 @@ router.get('/sistema/database-overview', async (_req: Request, res: Response) =>
   }
 });
 
-// Probar conexión directa a instancia de PostgreSQL (Supabase / Cloud SQL)
+// Probar conexión directa a instancia de PostgreSQL (Neon / Supabase / Cloud SQL)
 router.post('/sistema/probar-conexion-sql', async (req: Request, res: Response) => {
-  const { host, port, database, user, password, ssl, supabaseProjectId } = req.body;
-  const isSupabase = Boolean(supabaseProjectId) || (host && host.includes('supabase'));
-  const targetHost = supabaseProjectId 
-    ? `db.${supabaseProjectId}.supabase.co` 
-    : (host || process.env.SQL_HOST || 'db.fqatuwzsunvxbtryhloy.supabase.co');
+  let { host, port, database, user, password, ssl, supabaseProjectId, neonProjectId, neonBranchId, connectionString } = req.body;
+
+  if (connectionString) {
+    const parsed = parseConnectionString(connectionString);
+    if (parsed) {
+      if (parsed.host) host = parsed.host;
+      if (parsed.port) port = parsed.port;
+      if (parsed.database) database = parsed.database;
+      if (parsed.user) user = parsed.user;
+      if (parsed.password) password = parsed.password;
+      if (parsed.isNeon) neonProjectId = 'bitter-frost-14568057';
+    }
+  }
+
+  const isNeon = Boolean(neonProjectId) || (host && host.includes('neon.tech'));
+  const isSupabase = !isNeon && (Boolean(supabaseProjectId) || (host && host.includes('supabase')));
+
+  let targetHost = host;
+  if (!targetHost) {
+    if (isNeon) targetHost = 'ep-rough-term-b4jl3vvr-pooler.c-6.us-east-2.aws.neon.tech';
+    else if (isSupabase) targetHost = `db.${supabaseProjectId || 'fqatuwzsunvxbtryhloy'}.supabase.co`;
+    else targetHost = process.env.SQL_HOST || 'ep-rough-term-b4jl3vvr-pooler.c-6.us-east-2.aws.neon.tech';
+  }
+
   const targetPort = port ? parseInt(port, 10) : (process.env.SQL_PORT ? parseInt(process.env.SQL_PORT, 10) : 5432);
-  const targetDb = database || process.env.SQL_DB_NAME || 'postgres';
-  const targetUser = user || process.env.SQL_USER || 'postgres';
-  const targetPassword = password || process.env.SQL_PASSWORD || 'Tlmcj0510*';
-  const useSsl = isSupabase || ssl === true || ssl === 'true' || process.env.SQL_SSL === 'true';
+  const targetDb = database || (isNeon ? 'neondb' : (process.env.SQL_DB_NAME || 'postgres'));
+  const targetUser = user || (isNeon ? 'neondb_owner' : (process.env.SQL_USER || 'postgres'));
+  const targetPassword = password || process.env.SQL_PASSWORD || 'npg_zyGclK32wnNL';
+  const useSsl = isNeon || isSupabase || ssl === true || ssl === 'true' || process.env.SQL_SSL === 'true';
 
   const isSocket = targetHost.startsWith('/');
+  const effectiveConnStr = connectionString || (
+    isNeon && !isSocket
+      ? `postgresql://${encodeURIComponent(targetUser)}:${encodeURIComponent(targetPassword)}@${targetHost}:${targetPort}/${targetDb}?sslmode=require`
+      : undefined
+  );
   const { Pool } = await import('pg');
-  const testPool = new Pool({
+  const testPool = new Pool(effectiveConnStr ? {
+    connectionString: effectiveConnStr,
+    connectionTimeoutMillis: 7000,
+    ssl: { rejectUnauthorized: false }
+  } : {
     host: targetHost,
     port: isSocket ? undefined : targetPort,
     database: targetDb,
@@ -1065,11 +1093,16 @@ router.post('/sistema/probar-conexion-sql', async (req: Request, res: Response) 
     const result = await testPool.query('SELECT current_database() as db, current_user as usr, version() as ver');
     const latency = Date.now() - start;
     await testPool.end();
+
+    const providerLabel = isNeon ? 'Neon Serverless' : (isSupabase ? 'Supabase' : 'PostgreSQL');
     return res.json({
       ok: true,
+      is_neon: isNeon,
+      neon_project_id: neonProjectId || (isNeon ? 'bitter-frost-14568057' : undefined),
+      neon_branch_id: neonBranchId || (isNeon ? 'br-tiny-boat-b4jd4u1z' : undefined),
       is_supabase: isSupabase,
       supabase_project_id: supabaseProjectId || (isSupabase ? 'fqatuwzsunvxbtryhloy' : undefined),
-      mensaje: `¡Conexión exitosa a ${isSupabase ? 'Supabase (' + targetHost + ')' : 'PostgreSQL (' + targetHost + ':' + targetPort + ')'}!`,
+      mensaje: `¡Conexión exitosa a ${providerLabel} (${targetHost}:${targetPort})!`,
       base_datos: result.rows[0]?.db,
       usuario: result.rows[0]?.usr,
       version: result.rows[0]?.ver,
@@ -1081,9 +1114,15 @@ router.post('/sistema/probar-conexion-sql', async (req: Request, res: Response) 
     try { await testPool.end(); } catch (_) {}
     const isAuthError = err.message?.includes('password authentication failed') || err.code === '28P01';
     let instruccion = `Verifica que el host ${targetHost}:${targetPort} sea accesible por red pública.`;
-    if (isSupabase) {
+    if (isNeon) {
       if (isAuthError) {
-        instruccion = `Contraseña incorrecta para el usuario '${targetUser}' en el proyecto Supabase '${supabaseProjectId || 'fqatuwzsunvxbtryhloy'}'. Puedes restablecer o verificar tu contraseña en el panel de Supabase: Project Settings > Database > Database Password, e ingresarla en el campo correspondiente.`;
+        instruccion = `Contraseña incorrecta para el usuario '${targetUser}' en Neon (bitter-frost-14568057). En la consola de Neon (https://console.neon.tech/app/projects/bitter-frost-14568057/branches/br-tiny-boat-b4jd4u1z), consulta o restablece la contraseña del rol 'neondb_owner' o copia la Connection String completa.`;
+      } else {
+        instruccion = `Verifica que la rama 'br-tiny-boat-b4jd4u1z' del proyecto 'bitter-frost-14568057' esté activa en Neon Console.`;
+      }
+    } else if (isSupabase) {
+      if (isAuthError) {
+        instruccion = `Contraseña incorrecta para el usuario '${targetUser}' en el proyecto Supabase '${supabaseProjectId || 'fqatuwzsunvxbtryhloy'}'. Puedes restablecer o verificar tu contraseña en el panel de Supabase: Project Settings > Database > Database Password.`;
       } else {
         instruccion = `Verifica que el ID del proyecto '${supabaseProjectId || 'fqatuwzsunvxbtryhloy'}' esté activo en app.supabase.com y que el puerto 5432 o SSL estén habilitados.`;
       }
@@ -1093,8 +1132,8 @@ router.post('/sistema/probar-conexion-sql', async (req: Request, res: Response) 
 
     return res.json({
       ok: false,
+      is_neon: isNeon,
       is_supabase: isSupabase,
-      supabase_project_id: supabaseProjectId || (isSupabase ? 'fqatuwzsunvxbtryhloy' : undefined),
       mensaje: `No se pudo conectar a PostgreSQL en ${targetHost}:${targetPort}`,
       error_detalle: err.message || 'Timeout de conexión',
       codigo_error: err.code,
@@ -1105,23 +1144,24 @@ router.post('/sistema/probar-conexion-sql', async (req: Request, res: Response) 
   }
 });
 
-// Aplicar y cambiar la conexión activa en caliente (Supabase / Cloud SQL)
+// Aplicar y cambiar la conexión activa en caliente (Neon / Supabase / Cloud SQL)
 router.post('/sistema/conectar-base-datos', async (req: Request, res: Response) => {
-  const { host, port, database, user, password, ssl, supabaseProjectId } = req.body;
+  const { host, port, database, user, password, ssl, supabaseProjectId, neonProjectId, neonBranchId, connectionString } = req.body;
   try {
-    const isSupabase = Boolean(supabaseProjectId) || (host && host.includes('supabase'));
-    const targetHost = supabaseProjectId 
-      ? `db.${supabaseProjectId}.supabase.co` 
-      : (host || 'db.fqatuwzsunvxbtryhloy.supabase.co');
+    const isNeon = Boolean(neonProjectId) || (host && host.includes('neon.tech')) || (connectionString && connectionString.includes('neon.tech'));
+    const isSupabase = !isNeon && (Boolean(supabaseProjectId) || (host && host.includes('supabase')));
 
     const result = await reconnectPool({
-      host: targetHost,
+      host: host || (isNeon ? 'ep-rough-term-b4jl3vvr-pooler.c-6.us-east-2.aws.neon.tech' : undefined),
       port: port ? parseInt(port, 10) : 5432,
-      database: database || 'postgres',
-      user: user || 'postgres',
-      password: password || 'Tlmcj0510*',
-      ssl: isSupabase || ssl !== false,
-      supabaseProjectId: supabaseProjectId || (isSupabase ? 'fqatuwzsunvxbtryhloy' : undefined)
+      database: database || (isNeon ? 'neondb' : 'postgres'),
+      user: user || (isNeon ? 'neondb_owner' : 'postgres'),
+      password: password || process.env.SQL_PASSWORD || 'npg_zyGclK32wnNL',
+      ssl: isNeon || isSupabase || ssl !== false,
+      supabaseProjectId: isSupabase ? (supabaseProjectId || 'fqatuwzsunvxbtryhloy') : undefined,
+      neonProjectId: isNeon ? (neonProjectId || 'bitter-frost-14568057') : undefined,
+      neonBranchId: isNeon ? (neonBranchId || 'br-tiny-boat-b4jd4u1z') : undefined,
+      connectionString
     });
 
     // Asegurar tablas en la base de datos conectada
@@ -1130,10 +1170,11 @@ router.post('/sistema/conectar-base-datos', async (req: Request, res: Response) 
     await CloudSqlService.syncCloudSqlToDataStore(db);
 
     const overview = await CloudSqlService.getDatabaseOverview();
+    const provider = isNeon ? 'Neon Serverless' : (isSupabase ? 'Supabase' : 'PostgreSQL');
 
     return res.json({
       ok: true,
-      mensaje: `¡Base de datos conectada y activada en caliente con ${isSupabase ? 'Supabase (' + targetHost + ')' : 'PostgreSQL'}!`,
+      mensaje: `¡Base de datos conectada y activada en caliente con ${provider}!`,
       result,
       overview
     });

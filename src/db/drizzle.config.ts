@@ -3,15 +3,14 @@ import * as dotenv from "dotenv";
 
 dotenv.config();
 
-const supabaseProjectId = process.env.SUPABASE_PROJECT_ID || "fqatuwzsunvxbtryhloy";
-const defaultHost = supabaseProjectId ? `db.${supabaseProjectId}.supabase.co` : "34.175.144.94";
-const sqlHost = process.env.SQL_HOST || defaultHost;
+const neonHost = "ep-rough-term-b4jl3vvr-pooler.c-6.us-east-2.aws.neon.tech";
+const sqlHost = process.env.SQL_HOST || neonHost;
 const sqlPort = process.env.SQL_PORT ? parseInt(process.env.SQL_PORT, 10) : 5432;
-const sqlDbName = process.env.SQL_DB_NAME || "postgres";
-const user = process.env.SQL_ADMIN_USER || process.env.SQL_USER || "postgres";
-const password = process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD || "Tlmcj0510*";
+const sqlDbName = process.env.SQL_DB_NAME || "neondb";
+const user = process.env.SQL_ADMIN_USER || process.env.SQL_USER || "neondb_owner";
+const password = process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD || "npg_zyGclK32wnNL";
 const isSocket = sqlHost.startsWith('/');
-const useSsl = sqlHost.includes('supabase') || process.env.SQL_SSL === 'true' || process.env.SQL_SSL === 'require';
+const useSsl = sqlHost.includes('neon.tech') || sqlHost.includes('supabase') || process.env.SQL_SSL === 'true';
 
 console.log(`[Drizzle Kit] Configurando migraciones para PostgreSQL -> Host: ${sqlHost}, Puerto: ${isSocket ? 'Socket' : sqlPort}, BD: ${sqlDbName}, Usuario: ${user}, SSL: ${useSsl}`);
 
@@ -25,6 +24,10 @@ const dbCredentials: any = {
 
 if (!isSocket) {
   dbCredentials.port = sqlPort;
+}
+
+if (process.env.DATABASE_URL) {
+  dbCredentials.url = process.env.DATABASE_URL;
 }
 
 export default defineConfig({

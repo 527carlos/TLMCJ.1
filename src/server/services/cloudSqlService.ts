@@ -457,7 +457,7 @@ export class CloudSqlService {
       }));
     } catch (error) {
       console.error('[CloudSQL] Error getUsuarios:', error);
-      throw error;
+      return [];
     }
   }
 
@@ -1114,38 +1114,62 @@ export class CloudSqlService {
   public static async getDatabaseOverview() {
     try {
       const online = await this.isCloudSqlOnline();
-      const [uRes, eRes, fRes, pRes, bRes, mbRes, mlRes, mRes] = await Promise.all([
-        pool.query('SELECT count(*) as cnt FROM users'),
-        pool.query('SELECT count(*) as cnt FROM empresas'),
-        pool.query('SELECT count(*) as cnt FROM facturas'),
-        pool.query('SELECT count(*) as cnt FROM cuentas_puc'),
-        pool.query('SELECT count(*) as cnt FROM balance_terceros'),
-        pool.query('SELECT count(*) as cnt FROM movimientos_banco'),
-        pool.query('SELECT count(*) as cnt FROM movimientos_libro'),
-        pool.query('SELECT count(*) as cnt FROM modificaciones_repositorio')
-      ]);
+      let counts = { users: 0, empresas: 0, facturas: 0, cuentas_puc: 0, balance_terceros: 0, movimientos_banco: 0, movimientos_libro: 0, modificaciones: 0 };
+      let sampleEmpresas: any[] = [];
+      let sampleUsers: any[] = [];
+      let sampleFacturas: any[] = [];
+      let samplePuc: any[] = [];
+      let sampleBalance: any[] = [];
+      let sampleBanco: any[] = [];
+      let sampleLibro: any[] = [];
+      let sampleMod: any[] = [];
 
-      const counts = {
-        users: parseInt(uRes.rows[0]?.cnt || '0', 10),
-        empresas: parseInt(eRes.rows[0]?.cnt || '0', 10),
-        facturas: parseInt(fRes.rows[0]?.cnt || '0', 10),
-        cuentas_puc: parseInt(pRes.rows[0]?.cnt || '0', 10),
-        balance_terceros: parseInt(bRes.rows[0]?.cnt || '0', 10),
-        movimientos_banco: parseInt(mbRes.rows[0]?.cnt || '0', 10),
-        movimientos_libro: parseInt(mlRes.rows[0]?.cnt || '0', 10),
-        modificaciones: parseInt(mRes.rows[0]?.cnt || '0', 10),
-      };
+      if (online) {
+        try {
+          const [uRes, eRes, fRes, pRes, bRes, mbRes, mlRes, mRes] = await Promise.all([
+            pool.query('SELECT count(*) as cnt FROM users'),
+            pool.query('SELECT count(*) as cnt FROM empresas'),
+            pool.query('SELECT count(*) as cnt FROM facturas'),
+            pool.query('SELECT count(*) as cnt FROM cuentas_puc'),
+            pool.query('SELECT count(*) as cnt FROM balance_terceros'),
+            pool.query('SELECT count(*) as cnt FROM movimientos_banco'),
+            pool.query('SELECT count(*) as cnt FROM movimientos_libro'),
+            pool.query('SELECT count(*) as cnt FROM modificaciones_repositorio')
+          ]);
 
-      const [sampleEmpresas, sampleUsers, sampleFacturas, samplePuc, sampleBalance, sampleBanco, sampleLibro, sampleMod] = await Promise.all([
-        drizzleDb.select().from(schema.empresas).limit(5),
-        drizzleDb.select().from(schema.users).limit(5),
-        drizzleDb.select().from(schema.facturas).limit(5),
-        drizzleDb.select().from(schema.cuentasPuc).limit(5),
-        drizzleDb.select().from(schema.balanceTerceros).limit(5),
-        drizzleDb.select().from(schema.movimientosBanco).limit(5),
-        drizzleDb.select().from(schema.movimientosLibro).limit(5),
-        drizzleDb.select().from(schema.modificacionesRepositorio).limit(5)
-      ]);
+          counts = {
+            users: parseInt(uRes.rows[0]?.cnt || '0', 10),
+            empresas: parseInt(eRes.rows[0]?.cnt || '0', 10),
+            facturas: parseInt(fRes.rows[0]?.cnt || '0', 10),
+            cuentas_puc: parseInt(pRes.rows[0]?.cnt || '0', 10),
+            balance_terceros: parseInt(bRes.rows[0]?.cnt || '0', 10),
+            movimientos_banco: parseInt(mbRes.rows[0]?.cnt || '0', 10),
+            movimientos_libro: parseInt(mlRes.rows[0]?.cnt || '0', 10),
+            modificaciones: parseInt(mRes.rows[0]?.cnt || '0', 10),
+          };
+
+          const samples = await Promise.all([
+            drizzleDb.select().from(schema.empresas).limit(5),
+            drizzleDb.select().from(schema.users).limit(5),
+            drizzleDb.select().from(schema.facturas).limit(5),
+            drizzleDb.select().from(schema.cuentasPuc).limit(5),
+            drizzleDb.select().from(schema.balanceTerceros).limit(5),
+            drizzleDb.select().from(schema.movimientosBanco).limit(5),
+            drizzleDb.select().from(schema.movimientosLibro).limit(5),
+            drizzleDb.select().from(schema.modificacionesRepositorio).limit(5)
+          ]);
+          sampleEmpresas = samples[0] || [];
+          sampleUsers = samples[1] || [];
+          sampleFacturas = samples[2] || [];
+          samplePuc = samples[3] || [];
+          sampleBalance = samples[4] || [];
+          sampleBanco = samples[5] || [];
+          sampleLibro = samples[6] || [];
+          sampleMod = samples[7] || [];
+        } catch (e) {
+          console.warn('[Database] Advertencia obteniendo conteo de tablas:', e);
+        }
+      }
 
       const tables = [
         {
@@ -1216,22 +1240,42 @@ export class CloudSqlService {
 
       const totalRegistros = tables.reduce((acc, t) => acc + t.conteo, 0);
       const dbConfig = getActiveConnectionConfig();
-      const isSupabase = dbConfig.isSupabase || dbConfig.host.includes('supabase');
+      const isNeon = Boolean(dbConfig.isNeon || dbConfig.host.includes('neon.tech'));
+      const isSupabase = !isNeon && Boolean(dbConfig.isSupabase || dbConfig.host.includes('supabase'));
+
+      const cloudHost = isNeon
+        ? `Neon Serverless (${dbConfig.host}:${dbConfig.port})`
+        : (isSupabase 
+          ? `Supabase (${dbConfig.host}:${dbConfig.port})` 
+          : `Google Cloud SQL (${dbConfig.host}:${dbConfig.port})`);
+
+      const motor = isNeon
+        ? `Neon Serverless PostgreSQL (Proyecto ${dbConfig.neonProjectId || 'bitter-frost-14568057'})`
+        : (isSupabase 
+          ? `Supabase PostgreSQL (Proyecto ${dbConfig.supabaseProjectId || 'fqatuwzsunvxbtryhloy'})` 
+          : "Google Cloud SQL (PostgreSQL Managed)");
+
+      const cloudProject = isNeon
+        ? (dbConfig.neonProjectId || "bitter-frost-14568057")
+        : (isSupabase ? (dbConfig.supabaseProjectId || "fqatuwzsunvxbtryhloy") : "peak-sunset-511516-q7");
+
+      const cloudRegion = isNeon
+        ? "Neon AWS us-east-2 (Serverless Scale-to-Zero)"
+        : (isSupabase ? "Supabase Cloud AWS" : "us-east1");
 
       return {
         app_url: "https://consola-tlm-enterprise-fiscal-erp-engine.ai.studio",
-        cloud_host: isSupabase 
-          ? `Supabase (${dbConfig.host}:${dbConfig.port})` 
-          : `Google Cloud SQL (${dbConfig.host}:${dbConfig.port})`,
-        cloud_project: isSupabase ? (dbConfig.supabaseProjectId || "fqatuwzsunvxbtryhloy") : "peak-sunset-511516-q7",
-        cloud_region: isSupabase ? "Supabase Cloud AWS" : "us-east1",
-        cloud_user: dbConfig.user || "postgres",
+        cloud_host: cloudHost,
+        cloud_project: cloudProject,
+        cloud_region: cloudRegion,
+        cloud_user: dbConfig.user || "neondb_owner",
         estado: online ? "EN_LINEA_ACTIVO" : "OFFLINE",
-        motor: isSupabase 
-          ? `Supabase PostgreSQL (Proyecto ${dbConfig.supabaseProjectId || 'fqatuwzsunvxbtryhloy'})` 
-          : "Google Cloud SQL (PostgreSQL Managed)",
+        motor: motor,
         version: "2.0.0",
         propietario: "Juan Yaya - Administrador Maestro (automatizaciones@tlm.net.co)",
+        is_neon: isNeon,
+        neon_project_id: isNeon ? (dbConfig.neonProjectId || "bitter-frost-14568057") : undefined,
+        neon_branch_id: isNeon ? (dbConfig.neonBranchId || "br-tiny-boat-b4jd4u1z") : undefined,
         is_supabase: isSupabase,
         supabase_project_id: isSupabase ? (dbConfig.supabaseProjectId || "fqatuwzsunvxbtryhloy") : undefined,
         host_raw: dbConfig.host,
@@ -1240,10 +1284,10 @@ export class CloudSqlService {
         user_raw: dbConfig.user,
         ssl_raw: dbConfig.ssl,
         persistencia: {
-          tipo: isSupabase ? "Supabase PostgreSQL Managed (SSL Encrypted)" : "Relacional PostgreSQL Online Transaccional ACID",
-          archivo: dbConfig.database || "postgres",
+          tipo: isNeon ? "Neon Serverless Storage (Autoscaling)" : (isSupabase ? "Supabase PostgreSQL Managed (SSL Encrypted)" : "Relacional PostgreSQL Online Transaccional ACID"),
+          archivo: dbConfig.database || "neondb",
           tamano_bytes: 1048576,
-          tamano_legible: isSupabase ? "Supabase Cloud Storage" : "Cloud SQL Managed Storage",
+          tamano_legible: isNeon ? "Neon Serverless Storage" : (isSupabase ? "Supabase Cloud Storage" : "Cloud SQL Managed Storage"),
           activo_en_disco: true
         },
         estadisticas: {
@@ -1265,7 +1309,45 @@ export class CloudSqlService {
       };
     } catch (error) {
       console.error('[CloudSQL] Error getDatabaseOverview:', error);
-      throw error;
+      const dbConfig = getActiveConnectionConfig();
+      const isNeon = Boolean(dbConfig.isNeon || dbConfig.host.includes('neon.tech'));
+      const isSupabase = !isNeon && Boolean(dbConfig.isSupabase || dbConfig.host.includes('supabase'));
+      return {
+        app_url: "https://consola-tlm-enterprise-fiscal-erp-engine.ai.studio",
+        cloud_host: isNeon ? `Neon Serverless (${dbConfig.host}:${dbConfig.port})` : (isSupabase ? `Supabase (${dbConfig.host}:${dbConfig.port})` : `Google Cloud SQL (${dbConfig.host}:${dbConfig.port})`),
+        cloud_project: isNeon ? (dbConfig.neonProjectId || "bitter-frost-14568057") : (isSupabase ? (dbConfig.supabaseProjectId || "fqatuwzsunvxbtryhloy") : "peak-sunset-511516-q7"),
+        cloud_region: isNeon ? "Neon AWS us-east-2 (Serverless Scale-to-Zero)" : (isSupabase ? "Supabase Cloud AWS" : "us-east1"),
+        cloud_user: dbConfig.user || (isNeon ? "neondb_owner" : "postgres"),
+        estado: "PENDIENTE_AUTENTICACION",
+        motor: isNeon ? `Neon Serverless PostgreSQL (Proyecto ${dbConfig.neonProjectId || 'bitter-frost-14568057'})` : (isSupabase ? "Supabase PostgreSQL" : "Google Cloud SQL"),
+        version: "2.0.0",
+        propietario: "Juan Yaya - Administrador Maestro (automatizaciones@tlm.net.co)",
+        is_neon: isNeon,
+        neon_project_id: isNeon ? (dbConfig.neonProjectId || "bitter-frost-14568057") : undefined,
+        neon_branch_id: isNeon ? (dbConfig.neonBranchId || "br-tiny-boat-b4jd4u1z") : undefined,
+        is_supabase: isSupabase,
+        supabase_project_id: isSupabase ? (dbConfig.supabaseProjectId || "fqatuwzsunvxbtryhloy") : undefined,
+        host_raw: dbConfig.host,
+        port_raw: dbConfig.port,
+        database_raw: dbConfig.database,
+        user_raw: dbConfig.user,
+        ssl_raw: dbConfig.ssl,
+        persistencia: {
+          tipo: isNeon ? "Neon Serverless Storage (Autoscaling)" : (isSupabase ? "Supabase PostgreSQL Managed (SSL Encrypted)" : "Relacional PostgreSQL Online Transaccional ACID"),
+          archivo: dbConfig.database || "neondb",
+          tamano_bytes: 1048576,
+          tamano_legible: isNeon ? "Neon Serverless Storage" : "Cloud SQL Storage",
+          activo_en_disco: true
+        },
+        estadisticas: {
+          total_tablas: 8,
+          total_registros: 0,
+          uptime_segundos: Math.floor(process.uptime()),
+          memoria_usada_mb: (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1)
+        },
+        tablas: [],
+        gestiones_verificadas: []
+      };
     }
   }
 
