@@ -7,8 +7,15 @@ import { f350TaxEngine } from '../services/f350TaxEngine.ts';
 import { siigoService } from '../services/siigoService.ts';
 import { scalabilityArchitecture } from '../services/scalabilityArchitecture.ts';
 import { Factura } from '../domain/types.ts';
+import { hashPassword, isHashed, verifyPassword, matchesLegacyPassword } from '../services/passwordHasher.ts';
 
 const router = Router();
+
+// Quita hashes y códigos de recuperación antes de enviar un usuario al navegador
+function publicUser(user: any) {
+  const { hashed_password, codigo_recuperacion, codigo_recuperacion_expira, ...safe } = user;
+  return safe;
+}
 const upload = multer({ limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB support for batch uploads
 
 // ==========================================
@@ -39,20 +46,23 @@ router.post('/auth/login', (req: Request, res: Response) => {
     return res.status(403).json({ detail: "Tu cuenta está pendiente de aprobación por el Administrador Maestro (Juan Yaya)." });
   }
 
-  // Verificar coincidencia de contraseña si fue enviada
-  if (password && user.hashed_password) {
-    const isMatched = 
-      user.hashed_password === password ||
-      user.hashed_password === `hash_${password}` ||
-      (user.id_usuario === 1 && (password === 'admin123' || password === 'admin_hashed_token')) ||
-      (user.id_usuario === 5 && (password === 'colab123' || password === 'colab_andres_token')) ||
-      (user.id_usuario === 6 && (password === 'colab123' || password === 'colab_valentina_token')) ||
-      password === 'admin123' ||
-      password === 'colab123';
+  // La contraseña es obligatoria. Antes, sin contraseña el login pasaba.
+  if (!password || typeof password !== 'string' || !user.hashed_password) {
+    return res.status(401).json({ detail: "Credenciales inválidas. Verifica tu correo corporativo." });
+  }
 
-    if (!isMatched) {
-      return res.status(401).json({ detail: "Contraseña incorrecta. Si la olvidaste, puedes generar un código de recuperación a tu correo corporativo." });
-    }
+  const isMatched = isHashed(user.hashed_password)
+    ? verifyPassword(password, user.hashed_password)
+    : matchesLegacyPassword(password, user.hashed_password);
+
+  if (!isMatched) {
+    return res.status(401).json({ detail: "Contraseña incorrecta. Si la olvidaste, puedes generar un código de recuperación a tu correo corporativo." });
+  }
+
+  // Migración: si el registro aún estaba en texto plano, se guarda con scrypt.
+  if (!isHashed(user.hashed_password)) {
+    user.hashed_password = hashPassword(password);
+    db.saveToDisk();
   }
 
   // Verificar si requiere cambio obligatorio de contraseña en primer inicio
@@ -68,7 +78,7 @@ router.post('/auth/login', (req: Request, res: Response) => {
     empresas_ids: user.empresas_ids,
     avatar_url: user.avatar_url || null,
     requiere_cambio_password: mustChange,
-    usuario: user,
+    usuario: publicUser(user),
     mensaje_seguridad: mustChange 
       ? "Contraseña provisional detectada asignada por el Administrador. Debes cambiarla obligatoriamente a una contraseña alfanumérica de mínimo 8 caracteres antes de continuar."
       : undefined
@@ -99,7 +109,7 @@ router.post('/auth/cambiar-password', (req: Request, res: Response) => {
     return res.status(400).json({ detail: "La nueva contraseña debe ser diferente a la contraseña actual/provisional." });
   }
 
-  user.hashed_password = "hash_" + nueva_password;
+  user.hashed_password = hashPassword(nueva_password);
   user.requiere_cambio_password = false;
   user.ultimo_cambio_password = new Date().toISOString();
   db.saveToDisk();
@@ -151,7 +161,7 @@ router.post('/auth/usuarios/crear-por-admin', (req: Request, res: Response) => {
     id_usuario: Math.max(...db.usuarios.map(u => u.id_usuario), 0) + 1,
     nombre_completo: nombre_completo.trim(),
     email: email.toLowerCase().trim(),
-    hashed_password: "hash_" + password_provisional,
+    hashed_password: hashPassword(password_provisional),
     rol: roleValue,
     activo: true, // Creado y aprobado directamente por Juan el Administrador Maestro
     requiere_cambio_password: true, // Obligatorio cambiarla cuando el usuario entre
@@ -205,7 +215,7 @@ router.post('/auth/usuarios/:id/reset-password-admin', (req: Request, res: Respo
     return res.status(400).json({ detail: checkRule.message });
   }
 
-  user.hashed_password = "hash_" + nueva_password_provisional;
+  user.hashed_password = hashPassword(nueva_password_provisional);
   user.requiere_cambio_password = true; // Exigir cambio en el próximo ingreso
   user.codigo_recuperacion = null;
   user.codigo_recuperacion_expira = null;
@@ -230,7 +240,7 @@ router.post('/auth/usuarios/:id/reset-password-admin', (req: Request, res: Respo
   res.json({
     ok: true,
     mensaje: `Contraseña provisional asignada a ${user.nombre_completo}. Notificación de seguridad generada para ${user.email}.`,
-    usuario: user,
+    usuario: publicUser(user),
     notificacion: notif
   });
 });
@@ -306,7 +316,7 @@ router.post('/auth/recuperar-password/verificar-y-cambiar', (req: Request, res: 
     return res.status(400).json({ detail: checkRule.message });
   }
 
-  user.hashed_password = "hash_" + nueva_password;
+  user.hashed_password = hashPassword(nueva_password);
   user.codigo_recuperacion = null;
   user.codigo_recuperacion_expira = null;
   user.requiere_cambio_password = false;
@@ -351,7 +361,7 @@ router.post('/auth/register', (req: Request, res: Response) => {
     id_usuario: Math.max(...db.usuarios.map(u => u.id_usuario), 0) + 1,
     nombre_completo,
     email,
-    hashed_password: "hash_" + password,
+    hashed_password: hashPassword(password),
     rol: 'Analista' as const,
     activo: false,
     requiere_cambio_password: false,
@@ -368,7 +378,7 @@ router.post('/auth/register', (req: Request, res: Response) => {
 });
 
 router.get('/auth/usuarios', (_req: Request, res: Response) => {
-  res.json(db.usuarios);
+  res.json(db.usuarios.map(publicUser));
 });
 
 router.patch('/auth/usuarios/:id/aprobar', (req: Request, res: Response) => {
@@ -379,7 +389,7 @@ router.patch('/auth/usuarios/:id/aprobar', (req: Request, res: Response) => {
   }
   user.activo = true;
   db.saveToDisk();
-  res.json({ mensaje: `Usuario ${user.email} aprobado con éxito.`, usuario: user });
+  res.json({ mensaje: `Usuario ${user.email} aprobado con éxito.`, usuario: publicUser(user) });
 });
 
 router.patch('/auth/usuarios/:id/rol', (req: Request, res: Response) => {
@@ -399,7 +409,7 @@ router.patch('/auth/usuarios/:id/rol', (req: Request, res: Response) => {
   user.rol = rol;
   user.permisos = getDefaultPermissions(rol);
   db.saveToDisk();
-  res.json({ mensaje: `Rol cambiado a ${rol} con permisos estándar asociados.`, usuario: user });
+  res.json({ mensaje: `Rol cambiado a ${rol} con permisos estándar asociados.`, usuario: publicUser(user) });
 });
 
 router.patch('/auth/usuarios/:id/toggle-admin', (req: Request, res: Response) => {
@@ -461,7 +471,7 @@ router.patch('/auth/usuarios/:id/permisos', (req: Request, res: Response) => {
     user.rol = 'Contador';
   }
   db.saveToDisk();
-  res.json({ mensaje: `Permisos granulares actualizados para ${user.nombre_completo}.`, usuario: user });
+  res.json({ mensaje: `Permisos granulares actualizados para ${user.nombre_completo}.`, usuario: publicUser(user) });
 });
 
 router.patch('/auth/usuarios/:id/empresas', (req: Request, res: Response) => {
@@ -475,7 +485,7 @@ router.patch('/auth/usuarios/:id/empresas', (req: Request, res: Response) => {
     user.empresas_ids = empresas_ids;
     db.saveToDisk();
   }
-  res.json({ mensaje: `Empresas autorizadas actualizadas para ${user.nombre_completo}.`, usuario: user });
+  res.json({ mensaje: `Empresas autorizadas actualizadas para ${user.nombre_completo}.`, usuario: publicUser(user) });
 });
 
 router.patch('/auth/usuarios/:id/avatar', (req: Request, res: Response) => {

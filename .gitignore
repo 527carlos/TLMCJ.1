@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Datos locales de la aplicación (contienen usuarios y credenciales)
+data/tlm_database.json
