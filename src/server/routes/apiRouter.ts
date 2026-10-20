@@ -11,6 +11,7 @@ import crypto from 'crypto';
 import { hashPassword, isHashed, verifyPassword, matchesLegacyPassword } from '../services/passwordHasher.ts';
 import { startSession, endSession, getSessionUser, isAdminUser } from '../services/sessionAuth.ts';
 import { mailer } from '../services/mailer.ts';
+import { secondsLocked, recordFailure, lockFor, clearAttempts } from '../services/attemptLimiter.ts';
 import { Usuario } from '../domain/types.ts';
 
 const router = Router();
@@ -24,6 +25,13 @@ const PUBLIC_PATHS = new Set([
   '/auth/recuperar-password/solicitar-codigo',
   '/auth/recuperar-password/verificar-y-cambiar'
 ]);
+
+// Límites de intentos de inicio de sesión y de recuperación
+const LOGIN_MAX_POR_CUENTA = 5;
+const LOGIN_MAX_POR_IP = 30;
+const LOGIN_VENTANA_MS = 15 * 60 * 1000;
+const LOGIN_BLOQUEO_MS = 15 * 60 * 1000;
+const CODIGO_ESPERA_MS = 60 * 1000; // tiempo mínimo entre dos códigos del mismo correo
 
 // Crear, editar o borrar usuarios, y ver notificaciones de seguridad, solo para administradores
 function isAdminPath(req: Request): boolean {
@@ -49,6 +57,20 @@ router.use((req: Request, res: Response, next: NextFunction) => {
 function publicUser(user: any) {
   const { hashed_password, codigo_recuperacion, codigo_recuperacion_expira, intentos_codigo, ...safe } = user;
   return safe;
+}
+
+// Siguiente ID libre. No se usa la longitud de la lista: tras borrar un registro se repetiría un ID.
+function siguienteIdFactura(): number {
+  return db.facturas.reduce((max, f) => Math.max(max, f.id_factura), 0) + 1;
+}
+
+function siguienteIdEmpresa(): number {
+  return db.empresas.reduce((max, e) => Math.max(max, e.id_empresa), 0) + 1;
+}
+
+// Las credenciales de Siigo nunca salen completas hacia el navegador
+function maskEmpresa(empresa: any) {
+  return { ...empresa, siigo_access_key: empresa.siigo_access_key ? "••••••••••••••••" : "" };
 }
 
 // Los códigos de recuperación se guardan con hash, nunca en texto plano
@@ -98,10 +120,29 @@ export function validatePasswordRule(pwd: string): { ok: boolean; message?: stri
 
 router.post('/auth/login', (req: Request, res: Response) => {
   const { email, password } = req.body;
-  const user = db.usuarios.find(u => u.email.toLowerCase() === (email || '').toLowerCase().trim());
+  const correo = String(email || '').toLowerCase().trim();
+  const claveCuenta = `login:cuenta:${correo}`;
+  const claveIp = `login:ip:${req.ip}`;
+
+  // Bloqueo por cuenta (5 fallos) y por IP (30 fallos), ambos de 15 minutos
+  const segundosBloqueado = Math.max(secondsLocked(claveCuenta), secondsLocked(claveIp));
+  if (segundosBloqueado > 0) {
+    res.set('Retry-After', String(segundosBloqueado));
+    return res.status(429).json({
+      detail: `Demasiados intentos fallidos. Intenta de nuevo en ${Math.ceil(segundosBloqueado / 60)} minuto(s).`
+    });
+  }
+
+  const fallo = (detail: string, status = 401) => {
+    recordFailure(claveCuenta, LOGIN_MAX_POR_CUENTA, LOGIN_VENTANA_MS, LOGIN_BLOQUEO_MS);
+    recordFailure(claveIp, LOGIN_MAX_POR_IP, LOGIN_VENTANA_MS, LOGIN_BLOQUEO_MS);
+    return res.status(status).json({ detail });
+  };
+
+  const user = db.usuarios.find(u => u.email.toLowerCase() === correo);
 
   if (!user) {
-    return res.status(401).json({ detail: "Credenciales inválidas. Verifica tu correo corporativo." });
+    return fallo("Credenciales inválidas. Verifica tu correo corporativo.");
   }
 
   if (!user.activo) {
@@ -110,12 +151,14 @@ router.post('/auth/login', (req: Request, res: Response) => {
 
   // La contraseña es obligatoria. Antes, sin contraseña el login pasaba.
   if (!password || typeof password !== 'string' || !user.hashed_password) {
-    return res.status(401).json({ detail: "Credenciales inválidas. Verifica tu correo corporativo." });
+    return fallo("Credenciales inválidas. Verifica tu correo corporativo.");
   }
 
   if (!passwordMatches(user, password)) {
-    return res.status(401).json({ detail: "Contraseña incorrecta. Si la olvidaste, puedes generar un código de recuperación a tu correo corporativo." });
+    return fallo("Contraseña incorrecta. Si la olvidaste, puedes generar un código de recuperación a tu correo corporativo.");
   }
+
+  clearAttempts(claveCuenta);
 
   // Migración: si el registro aún estaba en texto plano, se guarda con scrypt.
   if (!isHashed(user.hashed_password)) {
@@ -243,7 +286,7 @@ router.post('/auth/usuarios/crear-por-admin', async (req: Request, res: Response
 
   db.addModificacion({
     autor_id: autor_id || 1,
-    autor_nombre: autor_nombre || "Juan Yaya - Administrador Maestro",
+    autor_nombre: autorDe(req).autor_nombre,
     tipo_accion: "COLABORACION",
     descripcion: `Creación de usuario ${nuevoUsuario.nombre_completo} (${nuevoUsuario.rol}) con contraseña provisional asignada por Juan`,
     detalles: `Cuenta activada con requisito forzado de cambio de clave al primer ingreso. Notificación enviada a ${nuevoUsuario.email}.`
@@ -296,7 +339,7 @@ router.post('/auth/usuarios/:id/reset-password-admin', async (req: Request, res:
 
   db.addModificacion({
     autor_id: autor_id || 1,
-    autor_nombre: autor_nombre || "Juan Yaya - Administrador Maestro",
+    autor_nombre: autorDe(req).autor_nombre,
     tipo_accion: "CONFIG_UPDATE",
     descripcion: `Restablecimiento de contraseña para ${user.nombre_completo} por Juan Yaya`,
     detalles: `Clave temporal asignada y notificada a ${user.email}. Usuario forzado a cambio alfanumérico.`
@@ -324,6 +367,15 @@ router.post('/auth/recuperar-password/solicitar-codigo', async (req: Request, re
   if (!mailer.enabled) {
     return res.status(503).json({ detail: "El envío de códigos por correo no está configurado. Pide al administrador que defina SMTP_HOST en el servidor." });
   }
+
+  // Espera entre códigos del mismo correo. Se aplica exista o no la cuenta, para no revelar nada.
+  const claveCodigo = `codigo:${String(email).toLowerCase().trim()}`;
+  const esperaCodigo = secondsLocked(claveCodigo);
+  if (esperaCodigo > 0) {
+    res.set('Retry-After', String(esperaCodigo));
+    return res.status(429).json({ detail: `Espera ${esperaCodigo} segundos antes de pedir otro código.` });
+  }
+  lockFor(claveCodigo, CODIGO_ESPERA_MS);
 
   // Misma respuesta exista o no la cuenta, para no revelar qué correos están registrados
   const respuestaGenerica = {
@@ -375,7 +427,16 @@ router.post('/auth/recuperar-password/verificar-y-cambiar', (req: Request, res: 
   const user = db.usuarios.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
   const mensajeCodigoIncorrecto = "El código de seguridad ingresado es incorrecto.";
 
+  // Bloqueo por correo: 5 fallos seguidos bloquean la verificación 15 minutos
+  const claveRecuperacion = `recuperar:${String(email).toLowerCase().trim()}`;
+  const esperaRecuperacion = secondsLocked(claveRecuperacion);
+  if (esperaRecuperacion > 0) {
+    res.set('Retry-After', String(esperaRecuperacion));
+    return res.status(429).json({ detail: `Demasiados intentos fallidos. Intenta de nuevo en ${Math.ceil(esperaRecuperacion / 60)} minuto(s).` });
+  }
+
   if (!user || !user.codigo_recuperacion) {
+    recordFailure(claveRecuperacion, LOGIN_MAX_POR_CUENTA, LOGIN_VENTANA_MS, LOGIN_BLOQUEO_MS);
     return res.status(400).json({ detail: mensajeCodigoIncorrecto });
   }
 
@@ -394,9 +455,12 @@ router.post('/auth/recuperar-password/verificar-y-cambiar', (req: Request, res: 
 
   if (user.codigo_recuperacion !== hashCodigo(String(codigo))) {
     user.intentos_codigo = (user.intentos_codigo || 0) + 1;
+    recordFailure(claveRecuperacion, LOGIN_MAX_POR_CUENTA, LOGIN_VENTANA_MS, LOGIN_BLOQUEO_MS);
     db.saveToDisk();
     return res.status(400).json({ detail: mensajeCodigoIncorrecto });
   }
+
+  clearAttempts(claveRecuperacion);
 
   if (nueva_password !== confirmar_password) {
     return res.status(400).json({ detail: "La confirmación no coincide con la nueva contraseña." });
@@ -631,84 +695,21 @@ router.get('/sistema/database-info', (_req: Request, res: Response) => {
 // ==========================================
 // GOOGLE CLOUD PLATFORM (GCP) INTEGRACIÓN
 // ==========================================
-router.get('/sistema/google-cloud-status', (_req: Request, res: Response) => {
-  res.json({
-    conectado: true,
-    proveedor: "Google Cloud Platform (GCP)",
-    servicio: "Google Cloud Run (Serverless Container Platform)",
-    region: "us-east1",
-    project_id: "395382435000",
-    service_account: "automatizaciones@tlm.net.co",
-    app_url: "https://ais-pre-jm2qqpvuit56ogjeno6hay-395382435000.us-east1.run.app",
-    dev_url: "https://ais-dev-jm2qqpvuit56ogjeno6hay-395382435000.us-east1.run.app",
-    entorno: process.env.NODE_ENV || "production",
-    instancia: {
-      runtime: `Node.js ${process.version}`,
-      puerto: process.env.PORT || 3000,
-      escalabilidad: "Autoscaling Dinámico (0 a N instancias Cloud Run)",
-      memoria_asignada: "1024 MB",
-      cpu_asignada: "1 vCPU",
-      uptime_segundos: Math.floor(process.uptime())
-    },
-    servicios_gcp: [
-      {
-        id: "cloud-run",
-        nombre: "Google Cloud Run",
-        tipo: "Cómputo & Microservicios",
-        estado: "ACTIVO & SALUDABLE",
-        detalles: "Aloja el backend de Consola TLM con balanceador HTTPS global y certificados TLS gestionados por Google.",
-        badge: "En ejecución"
-      },
-      {
-        id: "cloud-storage",
-        nombre: "Google Cloud Storage (GCS)",
-        tipo: "Almacenamiento de Archivos",
-        estado: "CONECTADO",
-        detalles: "Bucket optimizado para ingesta masiva de archivos XML UBL 2.1, extractos bancarios y backups JSON.",
-        badge: "Bucket Activo"
-      },
-      {
-        id: "cloud-iam",
-        nombre: "Google Cloud IAM & Roles",
-        tipo: "Seguridad & Gobierno",
-        estado: "VINCULADO",
-        detalles: "Políticas de identidad federadas para Juan Yaya (Admin Maestro) y equipo colaborador.",
-        badge: "RLS Protegido"
-      },
-      {
-        id: "cloud-logging",
-        nombre: "Google Cloud Logging & Monitoring",
-        tipo: "Observabilidad & Telemetría",
-        estado: "CONECTADO",
-        detalles: "Registro inmutable de auditoría CUFE, liquidaciones F350 y eventos de sincronización Siigo.",
-        badge: "Logs en vivo"
-      }
-    ],
-    latencia_ms: 18,
-    ultima_sincronizacion: new Date().toISOString()
+router.post('/sistema/google-cloud-sync', (_req: Request, res: Response) => {
+  // La integración con Google Cloud no está conectada: no se registra ninguna sincronización falsa
+  res.status(501).json({
+    ok: false,
+    simulado: true,
+    detail: 'La sincronización con Google Cloud no está configurada en este servidor. No se realizó ningún despliegue.'
   });
 });
 
-router.post('/sistema/google-cloud-sync', (req: Request, res: Response) => {
-  const { autor_id, autor_nombre, notas } = req.body;
-  const hash = 'gcp-' + Math.random().toString(36).substring(2, 9);
-  
-  const mod = db.addModificacion({
-    autor_id: autor_id || 1,
-    autor_nombre: autor_nombre || "Juan Yaya - Administrador Maestro",
-    tipo_accion: "GCP_SYNC",
-    descripcion: `Sincronización y despliegue del Repositorio v2.0 a Google Cloud Platform (${hash})`,
-    detalles: notas || "Snapshot atómico de base de datos y esquemas contables replicado en infraestructura Google Cloud Run."
-  });
-
+router.get('/sistema/google-cloud-status', (_req: Request, res: Response) => {
   res.json({
-    ok: true,
-    mensaje: "¡Repositorio v2.0 de Juan sincronizado exitosamente con Google Cloud!",
-    hash_despliegue: hash,
-    region: "us-east1",
-    servicio: "Google Cloud Run",
-    timestamp: new Date().toISOString(),
-    modificacion: mod
+    conectado: false,
+    mensaje: 'La integración con Google Cloud no está configurada en este servidor.',
+    proveedor: 'Google Cloud Platform (GCP)',
+    entorno: process.env.NODE_ENV || 'production'
   });
 });
 
@@ -719,21 +720,23 @@ router.get('/repositorio/juan', (_req: Request, res: Response) => {
   res.json({
     info: db.getRepositorioInfo(),
     modificaciones: db.modificaciones,
-    usuarios_colaboradores: db.usuarios.filter(u => u.activo)
+    usuarios_colaboradores: db.usuarios.filter(u => u.activo).map(publicUser)
   });
 });
 
 router.post('/repositorio/juan/modificacion', (req: Request, res: Response) => {
-  const { autor_id, autor_nombre, autor_email, autor_rol, tipo_accion, descripcion, detalles } = req.body;
+  const { tipo_accion, descripcion, detalles } = req.body;
   if (!descripcion) {
     return res.status(400).json({ detail: "Descripción de la modificación es requerida." });
   }
 
+  // El autor siempre es quien tiene la sesión activa
+  const usuario = (req as any).usuario as Usuario;
   const mod = db.addModificacion({
-    autor_id: autor_id ? Number(autor_id) : undefined,
-    autor_nombre,
-    autor_email,
-    autor_rol,
+    autor_id: usuario.id_usuario,
+    autor_nombre: usuario.nombre_completo,
+    autor_email: usuario.email,
+    autor_rol: usuario.rol,
     tipo_accion: tipo_accion || 'COLABORACION',
     descripcion,
     detalles
@@ -751,7 +754,7 @@ router.post('/repositorio/juan/consolidar-v2', (req: Request, res: Response) => 
   const { autor_id, autor_nombre, notas } = req.body;
   const mod = db.addModificacion({
     autor_id: autor_id || 1,
-    autor_nombre: autor_nombre || "Juan Yaya - Administrador Maestro",
+    autor_nombre: autorDe(req).autor_nombre,
     tipo_accion: "RELEASE_V2",
     descripcion: `Consolidación oficial de release: Versión 2.0 arrojada en Repositorio Central de Juan`,
     detalles: notas || "Árbol de cambios colaborativos sincronizado con éxito. Estado v2.0 estable."
@@ -780,8 +783,8 @@ router.get('/sistema/export-backup', (_req: Request, res: Response) => {
     info: db.getDatabaseInfo(),
     modificaciones: db.modificaciones,
     data: {
-      usuarios: db.usuarios,
-      empresas: db.empresas,
+      usuarios: db.usuarios.map(publicUser),
+      empresas: db.empresas.map(maskEmpresa),
       facturas: db.facturas,
       cuentasPUC: db.cuentasPUC,
       balanceTerceros: db.balanceTerceros,
@@ -795,7 +798,7 @@ router.get('/sistema/export-backup', (_req: Request, res: Response) => {
 // 2. EMPRESAS Y MULTI-TENANCY
 // ==========================================
 router.get('/empresas', (_req: Request, res: Response) => {
-  res.json(db.empresas);
+  res.json(db.empresas.map(maskEmpresa));
 });
 
 router.post('/empresas', (req: Request, res: Response) => {
@@ -805,7 +808,7 @@ router.post('/empresas', (req: Request, res: Response) => {
   }
 
   const nuevaEmpresa = {
-    id_empresa: db.empresas.length + 1,
+    id_empresa: siguienteIdEmpresa(),
     nombre_comercial,
     nit,
     software_erp: software_erp || "SIIGO_NUBE",
@@ -816,7 +819,7 @@ router.post('/empresas', (req: Request, res: Response) => {
   };
 
   db.empresas.push(nuevaEmpresa);
-  res.status(201).json(nuevaEmpresa);
+  res.status(201).json(maskEmpresa(nuevaEmpresa));
 });
 
 router.get('/empresas/:id/siigo-config', (req: Request, res: Response) => {
@@ -894,14 +897,28 @@ router.post('/facturas/upload', upload.array('archivos'), (req: Request, res: Re
   const idEmpresa = parseInt(req.body.id_empresa || '1');
   const files = (req.files as Express.Multer.File[]) || [];
   const processedFacturas: Factura[] = [];
+  const duplicadas: string[] = [];
+  const errores: { archivo: string; motivo: string }[] = [];
 
   for (const file of files) {
-    const xmlText = file.buffer.toString('utf-8');
-    const parsedList = xmlParser.parseXmlUbl(xmlText, file.originalname);
+    let parsedList;
+    try {
+      parsedList = xmlParser.parseXmlUbl(file.buffer.toString('utf-8'), file.originalname);
+    } catch (e: any) {
+      errores.push({ archivo: file.originalname, motivo: e.message });
+      continue;
+    }
 
     for (const p of parsedList) {
+      // Misma factura (mismo CUFE) ya cargada para esta empresa: no se vuelve a sumar
+      const yaExiste = db.facturas.some(f => f.id_empresa === idEmpresa && f.cufe_hash === p.cufe_hash);
+      if (yaExiste) {
+        duplicadas.push(p.factura_num);
+        continue;
+      }
+
       const nuevaFactura: Factura = {
-        id_factura: db.facturas.length + 1,
+        id_factura: siguienteIdFactura(),
         id_empresa: idEmpresa,
         factura_num: p.factura_num,
         fecha: p.fecha,
@@ -937,10 +954,21 @@ router.post('/facturas/upload', upload.array('archivos'), (req: Request, res: Re
     }
   }
 
+  // Si ningún archivo sirvió, la carga falla completa (422) con el motivo de cada uno
+  if (processedFacturas.length === 0 && errores.length > 0) {
+    return res.status(422).json({
+      detail: "Ningún archivo XML pudo cargarse. Revisa el motivo de cada archivo.",
+      archivos_procesados: files.length,
+      errores
+    });
+  }
+
   res.json({
     status: 'success',
     archivos_procesados: files.length,
     facturas_creadas: processedFacturas.length,
+    duplicadas,
+    errores,
     facturas: processedFacturas
   });
 });
@@ -1003,7 +1031,7 @@ router.post('/facturas/seed-demo', (req: Request, res: Response) => {
 
   demoItems.forEach(d => {
     db.facturas.push({
-      id_factura: db.facturas.length + 1,
+      id_factura: siguienteIdFactura(),
       id_empresa: idEmpresa,
       factura_num: d.factura_num!,
       fecha: d.fecha!,
@@ -1050,18 +1078,36 @@ router.post('/facturas/bulk-delete', (req: Request, res: Response) => {
   res.json({ mensaje: `Se eliminaron ${ids.length} facturas.`, restantes: db.facturas.length });
 });
 
+// Estados que puede fijar un auditor. SINCRONIZADA_SIIGO solo lo fija el envío a Siigo.
+const ESTADOS_AUDITORIA = ['PENDIENTE', 'AUDITADA', 'RECHAZADA'];
+
+// Número dentro de un rango; null si no es un número válido
+function numeroEnRango(valor: unknown, min: number, max: number): number | null {
+  if (valor === '' || valor === null || valor === undefined) return null;
+  const n = Number(valor);
+  return Number.isFinite(n) && n >= min && n <= max ? n : null;
+}
+
+// Quién hace el cambio: siempre la sesión activa, nunca un dato enviado por el cliente
+function autorDe(req: Request) {
+  const u = (req as any).usuario as Usuario | undefined;
+  return { autor_id: u?.id_usuario, autor_nombre: u?.nombre_completo || 'Usuario no identificado' };
+}
+
 router.patch('/facturas/:id/estado', (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
-  const { estado, autor_nombre, autor_id } = req.body;
+  const { estado } = req.body;
   const f = db.facturas.find(fact => fact.id_factura === id);
   if (!f) return res.status(404).json({ detail: "Factura no encontrada." });
+  if (!ESTADOS_AUDITORIA.includes(estado)) {
+    return res.status(400).json({ detail: `Estado no válido. Usa uno de: ${ESTADOS_AUDITORIA.join(', ')}.` });
+  }
   const old = f.estado_revision;
   f.estado_revision = estado;
   db.saveToDisk();
 
   db.addModificacion({
-    autor_id: autor_id ? Number(autor_id) : undefined,
-    autor_nombre: autor_nombre || (req.headers['x-user-name'] as string),
+    ...autorDe(req),
     tipo_accion: 'FACTURA_AUDITADA',
     descripcion: `Cambio de estado en factura ${f.factura_num}: ${old} → ${estado}`,
     detalles: `Proveedor: ${f.proveedor}. Total: $${(f.total || 0).toLocaleString('es-CO')} COP.`
@@ -1072,18 +1118,20 @@ router.patch('/facturas/:id/estado', (req: Request, res: Response) => {
 
 router.patch('/facturas/:id/cuenta', (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
-  const { cuenta_gasto, autor_nombre, autor_id } = req.body;
+  const { cuenta_gasto } = req.body;
   const f = db.facturas.find(fact => fact.id_factura === id);
   if (!f) return res.status(404).json({ detail: "Factura no encontrada." });
+  if (typeof cuenta_gasto !== 'string' || !cuenta_gasto.trim()) {
+    return res.status(400).json({ detail: "Indica la cuenta contable de gasto." });
+  }
   const old = f.cuenta_gasto;
-  f.cuenta_gasto = cuenta_gasto;
+  f.cuenta_gasto = cuenta_gasto.trim();
   db.saveToDisk();
 
   db.addModificacion({
-    autor_id: autor_id ? Number(autor_id) : undefined,
-    autor_nombre: autor_nombre || (req.headers['x-user-name'] as string),
+    ...autorDe(req),
     tipo_accion: 'PUC_UPDATE',
-    descripcion: `Reclasificación PUC en ${f.factura_num}: ${old} → ${cuenta_gasto}`,
+    descripcion: `Reclasificación PUC en ${f.factura_num}: ${old} → ${f.cuenta_gasto}`,
     detalles: `Tercero: ${f.nit_tercero} (${f.proveedor})`
   });
 
@@ -1092,21 +1140,30 @@ router.patch('/facturas/:id/cuenta', (req: Request, res: Response) => {
 
 router.patch('/facturas/:id/retencion', (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
-  const { retencion_porc, casilla_350, autor_nombre, autor_id } = req.body;
+  const { retencion_porc, casilla_350 } = req.body;
   const f = db.facturas.find(fact => fact.id_factura === id);
   if (!f) return res.status(404).json({ detail: "Factura no encontrada." });
-  if (retencion_porc !== undefined) {
-    f.retencion_porc = Number(retencion_porc);
-    f.retencion_valor = Math.round((f.subtotal * f.retencion_porc) / 100);
+
+  const porc = retencion_porc !== undefined ? numeroEnRango(retencion_porc, 0, 100) : undefined;
+  if (retencion_porc !== undefined && porc === null) {
+    return res.status(400).json({ detail: "La tarifa de retención debe estar entre 0 y 100." });
   }
-  if (casilla_350 !== undefined) {
-    f.casilla_350 = Number(casilla_350);
+  const casilla = casilla_350 !== undefined ? numeroEnRango(casilla_350, 1, 999) : undefined;
+  if (casilla_350 !== undefined && casilla === null) {
+    return res.status(400).json({ detail: "La casilla del F350 no es válida." });
+  }
+
+  if (porc !== undefined && porc !== null) {
+    f.retencion_porc = porc;
+    f.retencion_valor = Math.round((f.subtotal * porc) / 100);
+  }
+  if (casilla !== undefined && casilla !== null) {
+    f.casilla_350 = casilla;
   }
   db.saveToDisk();
 
   db.addModificacion({
-    autor_id: autor_id ? Number(autor_id) : undefined,
-    autor_nombre: autor_nombre || (req.headers['x-user-name'] as string),
+    ...autorDe(req),
     tipo_accion: 'FACTURA_UPDATE',
     descripcion: `Ajuste tributario F350 en ${f.factura_num}: tarifa ${f.retencion_porc}%, casilla ${f.casilla_350}`,
     detalles: `Retención calculada: $${f.retencion_valor.toLocaleString('es-CO')} COP.`
@@ -1117,15 +1174,18 @@ router.patch('/facturas/:id/retencion', (req: Request, res: Response) => {
 
 router.patch('/facturas/:id/reteica', (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
-  const { reteica_tarifa, autor_nombre, autor_id } = req.body;
+  const { reteica_tarifa } = req.body;
   const f = db.facturas.find(fact => fact.id_factura === id);
   if (!f) return res.status(404).json({ detail: "Factura no encontrada." });
-  f.reteica_tarifa = Number(reteica_tarifa);
+  const tarifa = numeroEnRango(reteica_tarifa, 0, 50); // tarifa por mil
+  if (tarifa === null) {
+    return res.status(400).json({ detail: "La tarifa de ReteICA debe estar entre 0 y 50 por mil." });
+  }
+  f.reteica_tarifa = tarifa;
   db.saveToDisk();
 
   db.addModificacion({
-    autor_id: autor_id ? Number(autor_id) : undefined,
-    autor_nombre: autor_nombre || (req.headers['x-user-name'] as string),
+    ...autorDe(req),
     tipo_accion: 'FACTURA_UPDATE',
     descripcion: `Actualización tarifa ReteICA ${f.factura_num} a ${f.reteica_tarifa}‰`,
     detalles: `Proveedor: ${f.proveedor}`
@@ -1136,15 +1196,18 @@ router.patch('/facturas/:id/reteica', (req: Request, res: Response) => {
 
 router.patch('/facturas/:id/reteiva', (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
-  const { reteiva_porc, autor_nombre, autor_id } = req.body;
+  const { reteiva_porc } = req.body;
   const f = db.facturas.find(fact => fact.id_factura === id);
   if (!f) return res.status(404).json({ detail: "Factura no encontrada." });
-  f.reteiva_porc = Number(reteiva_porc);
+  const porc = numeroEnRango(reteiva_porc, 0, 100);
+  if (porc === null) {
+    return res.status(400).json({ detail: "La tarifa de ReteIVA debe estar entre 0 y 100." });
+  }
+  f.reteiva_porc = porc;
   db.saveToDisk();
 
   db.addModificacion({
-    autor_id: autor_id ? Number(autor_id) : undefined,
-    autor_nombre: autor_nombre || (req.headers['x-user-name'] as string),
+    ...autorDe(req),
     tipo_accion: 'FACTURA_UPDATE',
     descripcion: `Actualización tarifa ReteIVA ${f.factura_num} a ${f.reteiva_porc}%`,
     detalles: `Proveedor: ${f.proveedor}`
@@ -1155,17 +1218,19 @@ router.patch('/facturas/:id/reteiva', (req: Request, res: Response) => {
 
 router.patch('/facturas/:id/medio-pago', (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
-  const { medio_pago, autor_nombre, autor_id } = req.body;
+  const { medio_pago } = req.body;
   const f = db.facturas.find(fact => fact.id_factura === id);
   if (!f) return res.status(404).json({ detail: "Factura no encontrada." });
-  f.medio_pago = medio_pago;
+  if (typeof medio_pago !== 'string' || !medio_pago.trim()) {
+    return res.status(400).json({ detail: "Indica el medio de pago." });
+  }
+  f.medio_pago = medio_pago.trim();
   db.saveToDisk();
 
   db.addModificacion({
-    autor_id: autor_id ? Number(autor_id) : undefined,
-    autor_nombre: autor_nombre || (req.headers['x-user-name'] as string),
+    ...autorDe(req),
     tipo_accion: 'FACTURA_UPDATE',
-    descripcion: `Medio de pago actualizado en ${f.factura_num}: ${medio_pago}`,
+    descripcion: `Medio de pago actualizado en ${f.factura_num}: ${f.medio_pago}`,
     detalles: `Forma de pago: ${f.forma_pago}`
   });
 
@@ -1183,9 +1248,12 @@ router.get('/facturas/kpis/resumen', (req: Request, res: Response) => {
   let totalAuditadas = 0;
 
   facts.forEach(f => {
-    totalSubtotal += f.subtotal || 0;
-    totalIva += f.iva || 0;
-    totalRetencion += f.retencion_valor || 0;
+    // Las notas crédito restan compras e IVA, y no generan retención (igual que el F350)
+    const esNota = f.tipo_comprobante === 'NOTA_CREDITO';
+    const signo = esNota ? -1 : 1;
+    totalSubtotal += signo * (f.subtotal || 0);
+    totalIva += signo * (f.iva || 0);
+    if (!esNota) totalRetencion += f.retencion_valor || 0;
     if (f.estado_revision === 'AUDITADA' || f.estado_revision === 'SINCRONIZADA_SIIGO') {
       totalAuditadas++;
     }

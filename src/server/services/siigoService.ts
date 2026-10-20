@@ -1,7 +1,8 @@
 import { Factura } from '../domain/types.ts';
 
 export interface SiigoSyncResponse {
-  status: 'success' | 'error';
+  status: 'success' | 'simulado' | 'error';
+  simulado?: boolean;
   factura_num: string;
   siigo_id?: string;
   mensaje: string;
@@ -108,14 +109,12 @@ export class SiigoService {
         retentions: factura.retencion_valor > 0 ? [{ id: 201 }] : []
       };
 
-      // Generated Siigo Purchase Voucher ID
-      const generatedId = `SG-DOC-${Math.floor(10000 + Math.random() * 90000)}`;
-
+      // La llamada real a la API de Siigo Nube no está conectada todavía: no se inventa un folio
       return {
-        status: 'success',
+        status: 'simulado',
+        simulado: true,
         factura_num: factura.factura_num,
-        siigo_id: generatedId,
-        mensaje: `Comprobante de compra registrado exitosamente en Siigo Nube con folio [${generatedId}].`,
+        mensaje: "Modo simulación: el comprobante NO se envió a Siigo Nube. Falta conectar la API real con credenciales válidas.",
         payloadSent: siigoPayload
       };
     } catch (err: any) {

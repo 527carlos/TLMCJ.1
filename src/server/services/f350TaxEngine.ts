@@ -93,9 +93,13 @@ export class F350TaxEngineService {
 
     casillasResult.sort((a, b) => a.casilla - b.casilla);
 
+    // Año gravable tomado de las facturas (el más reciente); si no hay facturas, el año en curso
+    const anos = facturas.map(f => new Date(f.fecha).getFullYear()).filter(a => Number.isFinite(a));
+    const anoGravable = anos.length > 0 ? Math.max(...anos) : new Date().getFullYear();
+
     return {
-      periodo: "Marzo 2026",
-      anoGravable: 2026,
+      periodo: `Año gravable ${anoGravable}`,
+      anoGravable,
       totalBasesGravables: Math.round(totalBases),
       totalRetenciones: Math.round(totalRet),
       totalReteIva: Math.round(totalReteIva),

@@ -40,17 +40,19 @@ export class XmlUblParserService {
       const isCreditNote = /<CreditNote\b/i.test(xmlContent);
       const invoiceNumberMatch = xmlContent.match(/<cbc:ID[^>]*>([^<]+)<\/cbc:ID>/i) ||
                                  xmlContent.match(/<ID[^>]*>([^<]+)<\/ID>/i);
-      let factura_num = invoiceNumberMatch ? invoiceNumberMatch[1].trim() : "FE-" + Math.floor(1000 + Math.random() * 9000);
-      if (factura_num.length > 30 || factura_num.startsWith("http")) {
-        factura_num = fileName.replace(/\.[^/.]+$/, "").replace(/[^\w-]/g, "") || "FE-" + Math.floor(1000 + Math.random() * 9000);
+      let factura_num = invoiceNumberMatch ? invoiceNumberMatch[1].trim() : "";
+      if (!factura_num || factura_num.length > 30 || factura_num.startsWith("http")) {
+        factura_num = fileName.replace(/\.[^/.]+$/, "").replace(/[^\w-]/g, "");
       }
+      if (!factura_num) throw new Error("No se encontró el número de factura.");
 
       // Fecha de Emisión
       const dateMatch = xmlContent.match(/<cbc:IssueDate[^>]*>([^<]+)<\/cbc:IssueDate>/i) ||
                         xmlContent.match(/<IssueDate[^>]*>([^<]+)<\/IssueDate>/i);
-      const fecha = dateMatch ? dateMatch[1].trim() : new Date().toISOString().split('T')[0];
+      if (!dateMatch) throw new Error("La factura no tiene fecha de emisión.");
+      const fecha = dateMatch[1].trim();
 
-      // CUFE
+      // CUFE: si el XML no lo trae, la huella del contenido sirve para detectar duplicados
       const cufeMatch = xmlContent.match(/<cbc:UUID[^>]*>([^<]+)<\/cbc:UUID>/i) ||
                         xmlContent.match(/<UUID[^>]*>([^<]+)<\/UUID>/i);
       let cufe_hash = cufeMatch ? cufeMatch[1].trim() : crypto.createHash('sha256').update(xmlContent).digest('hex');
@@ -59,17 +61,19 @@ export class XmlUblParserService {
       const nameMatch = xmlContent.match(/<cac:AccountingSupplierParty[\s\S]*?<cbc:RegistrationName[^>]*>([^<]+)<\/cbc:RegistrationName>/i) ||
                         xmlContent.match(/<cac:PartyName[\s\S]*?<cbc:Name[^>]*>([^<]+)<\/cbc:Name>/i) ||
                         xmlContent.match(/<cbc:RegistrationName[^>]*>([^<]+)<\/cbc:RegistrationName>/i);
-      const proveedor = nameMatch ? nameMatch[1].trim() : "PROVEEDOR NACIONAL S.A.S.";
+      if (!nameMatch) throw new Error("La factura no identifica al proveedor (RegistrationName).");
+      const proveedor = nameMatch[1].trim();
 
       // NIT Proveedor
       const nitMatch = xmlContent.match(/<cac:AccountingSupplierParty[\s\S]*?<cbc:CompanyID[^>]*>([^<]+)<\/cbc:CompanyID>/i) ||
                        xmlContent.match(/<cbc:CompanyID[^>]*>([^<]+)<\/cbc:CompanyID>/i);
-      let nit_tercero = nitMatch ? nitMatch[1].trim().split('-')[0].replace(/[^\d]/g, "") : "900" + Math.floor(100000 + Math.random() * 900000);
-      if (nit_tercero.length < 6) nit_tercero = "901234567";
+      if (!nitMatch) throw new Error("La factura no trae el NIT del proveedor.");
+      const nit_tercero = nitMatch[1].trim().split('-')[0].replace(/[^\d]/g, "");
+      if (nit_tercero.length < 6) throw new Error(`El NIT del proveedor no es válido: "${nitMatch[1].trim()}".`);
 
-      // Ciudad / Dirección
+      // Ciudad (opcional: si no viene en el XML queda vacía)
       const cityMatch = xmlContent.match(/<cbc:CityName[^>]*>([^<]+)<\/cbc:CityName>/i);
-      const ciudad = cityMatch ? cityMatch[1].trim() : "Bogotá D.C.";
+      const ciudad = cityMatch ? cityMatch[1].trim() : undefined;
 
       // Forma y Medio de Pago
       let forma_pago = "Contado";
@@ -83,12 +87,16 @@ export class XmlUblParserService {
         }
       }
 
-      // Monetary Totals
-      const subtotalMatch = xmlContent.match(/<cbc:LineExtensionAmount[^>]*>([^<]+)<\/cbc:LineExtensionAmount>/i);
-      const subtotalVal = subtotalMatch ? parseFloat(subtotalMatch[1].trim()) : 1500000;
+      // Totales: el subtotal sale del total de cabecera (LegalMonetaryTotal), no de la primera línea
+      const totalesMatch = xmlContent.match(/<cac:LegalMonetaryTotal[\s\S]*?<\/cac:LegalMonetaryTotal>/i);
+      const subtotalMatch = totalesMatch ? totalesMatch[0].match(/<cbc:LineExtensionAmount[^>]*>([^<]+)<\/cbc:LineExtensionAmount>/i) : null;
+      if (!subtotalMatch) throw new Error("La factura no tiene total de cabecera (LegalMonetaryTotal).");
+      const subtotalVal = parseFloat(subtotalMatch[1].trim());
+      if (!Number.isFinite(subtotalVal)) throw new Error("El valor total de la factura no es un número.");
 
+      // IVA: solo si el XML lo declara; no se asume una tarifa
       const taxAmountMatch = xmlContent.match(/<cac:TaxTotal[\s\S]*?<cbc:TaxAmount[^>]*>([^<]+)<\/cbc:TaxAmount>/i);
-      const ivaVal = taxAmountMatch ? parseFloat(taxAmountMatch[1].trim()) : Math.round(subtotalVal * 0.19);
+      const ivaVal = taxAmountMatch ? parseFloat(taxAmountMatch[1].trim()) : 0;
 
       // Descripción del ítem
       const descMatch = xmlContent.match(/<cbc:Description[^>]*>([^<]+)<\/cbc:Description>/i);
@@ -129,7 +137,6 @@ export class XmlUblParserService {
           proveedor,
           nit_tercero,
           ciudad,
-          departamento: "Cundinamarca",
           descripcion_item: descripcion,
           cantidad: 1,
           valor_unitario: subtotalVal,
@@ -149,8 +156,8 @@ export class XmlUblParserService {
         }
       ];
     } catch (err: any) {
-      console.error("Error parsing XML UBL:", err);
-      return [];
+      // Un XML que no se puede leer se informa al usuario; no se guarda con datos inventados
+      throw new Error(`XML no válido: ${err.message}`);
     }
   }
 }

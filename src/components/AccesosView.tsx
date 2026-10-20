@@ -303,7 +303,8 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
         })
       });
       const data = await res.json();
-      setGcpSyncSuccess(data.mensaje);
+      // Si el servidor no tiene Google Cloud configurado, se muestra el motivo en lugar de un éxito
+      setGcpSyncSuccess(res.ok ? data.mensaje : `⚠️ ${data.detail}`);
       await fetchGcpStatus();
     } catch (e) {
       console.error("Error al sincronizar con Google Cloud:", e);

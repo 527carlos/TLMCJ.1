@@ -161,7 +161,14 @@ export default function App() {
         body: formData
       });
       const data = await res.json();
-      showToast(`¡Se procesaron ${data.archivos_procesados} archivos XML UBL exitosamente!`);
+      if (!res.ok) {
+        showToast(data.detail || 'No se pudo cargar ningún archivo XML.', 'error');
+        return;
+      }
+      const partes = [`${data.facturas_creadas} factura(s) cargada(s)`];
+      if (data.duplicadas?.length) partes.push(`${data.duplicadas.length} duplicada(s) omitida(s)`);
+      if (data.errores?.length) partes.push(`${data.errores.length} archivo(s) con error`);
+      showToast(partes.join(' · '), data.errores?.length ? 'error' : 'success');
       loadData();
     } catch (err) {
       showToast('Error procesando archivos XML.', 'error');
