@@ -1,8 +1,10 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import apiRouter from './src/server/routes/apiRouter.ts';
+import { db } from './src/server/storage/dataStore.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,6 +50,9 @@ async function startServer() {
     });
   }
 
+  // Espera a que los datos se carguen (JSON local o PostgreSQL) antes de atender peticiones
+  await db.ready;
+
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Consola TLM] Servidor unificado ejecutándose en http://0.0.0.0:${PORT}`);
   });
@@ -55,5 +60,8 @@ async function startServer() {
 
 startServer().catch((err) => {
   console.error("Error arrancando el servidor Consola TLM:", err);
+  if (process.env.DATABASE_URL) {
+    console.error("Revisa DATABASE_URL en .env: usuario, clave, host y que termine en ?sslmode=require (Neon).");
+  }
   process.exit(1);
 });

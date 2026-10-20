@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { Usuario, PermisosUsuario, Empresa, Factura, CuentaPUC, BalanceTercero, MovimientoBancario, MovimientoLibro, ModificacionRepositorio, RepositorioInfo, NotificacionSeguridad } from '../domain/types.ts';
+import { createPostgresStore } from './postgresStore.ts';
 
 export function getDefaultPermissions(rol: 'Administrador' | 'Contador' | 'Analista' | 'Auditor'): PermisosUsuario {
   switch (rol) {
@@ -56,11 +57,51 @@ class DataStore {
 
   private dbFilePath = path.resolve(process.cwd(), 'data', 'tlm_database.json');
 
+  // Si existe DATABASE_URL (Neon/PostgreSQL), el estado se guarda en la base; si no, en el JSON local.
+  private pgStore = process.env.DATABASE_URL ? createPostgresStore(process.env.DATABASE_URL) : null;
+  private writeQueue: Promise<void> = Promise.resolve();
+
+  // El servidor espera a este promise antes de empezar a atender peticiones.
+  public ready: Promise<void>;
+
   constructor() {
-    if (!this.loadFromDisk()) {
+    this.ready = this.init();
+  }
+
+  private async init() {
+    if (this.pgStore) {
+      await this.pgStore.init();
+    }
+    const fromDb = this.pgStore ? await this.pgStore.read() : null;
+    const dump = fromDb ?? this.readDumpFromFile();
+
+    if (dump && this.applyDump(dump)) {
+      // Primera vez con la base: se copian los datos del JSON local a PostgreSQL.
+      if (!fromDb && this.pgStore) {
+        this.saveToDisk();
+      }
+    } else {
       this.initSeedData();
       this.saveToDisk();
     }
+    await this.writeQueue;
+  }
+
+  private readDumpFromFile(): any | null {
+    try {
+      if (fs.existsSync(this.dbFilePath)) {
+        return JSON.parse(fs.readFileSync(this.dbFilePath, 'utf-8'));
+      }
+    } catch (e) {
+      console.warn("[DataStore] No se pudo leer el archivo local:", e);
+    }
+    return null;
+  }
+
+  private enqueueWrite(dump: object) {
+    this.writeQueue = this.writeQueue
+      .then(() => this.pgStore!.write(dump))
+      .catch((e) => console.warn("[DataStore] No se pudo guardar en PostgreSQL:", e));
   }
 
   public saveToDisk() {
@@ -85,94 +126,94 @@ class DataStore {
         modificaciones: this.modificaciones,
         notificacionesSeguridad: this.notificacionesSeguridad
       };
-      fs.writeFileSync(this.dbFilePath, JSON.stringify(dump, null, 2), 'utf-8');
+      if (this.pgStore) {
+        this.enqueueWrite(dump);
+      } else {
+        fs.writeFileSync(this.dbFilePath, JSON.stringify(dump, null, 2), 'utf-8');
+      }
     } catch (e) {
       console.warn("[DataStore] No se pudo guardar en disco:", e);
     }
   }
 
-  public loadFromDisk(): boolean {
+  private applyDump(dump: any): boolean {
     try {
-      if (fs.existsSync(this.dbFilePath)) {
-        const raw = fs.readFileSync(this.dbFilePath, 'utf-8');
-        const dump = JSON.parse(raw);
-        if (dump && dump.usuarios && dump.empresas) {
-          this.usuarios = dump.usuarios.map((u: any) => ({
-            ...u,
-            permisos: u.permisos || getDefaultPermissions(u.rol)
-          }));
+      if (dump && dump.usuarios && dump.empresas) {
+        this.usuarios = dump.usuarios.map((u: any) => ({
+          ...u,
+          permisos: u.permisos || getDefaultPermissions(u.rol)
+        }));
 
-          // Asegurar que los 2 nuevos colaboradores existen
-          if (!this.usuarios.find(u => u.id_usuario === 5)) {
-            this.usuarios.push({
-              id_usuario: 5,
-              nombre_completo: "Andrés Felipe Morales (Especialista Tributario)",
-              email: "andres.morales@tlm.net.co",
-              hashed_password: "colab_andres_token",
-              rol: "Contador",
-              activo: true,
-              empresas_ids: [1, 2],
-              permisos: getDefaultPermissions('Contador')
-            });
-          }
-
-          if (!this.usuarios.find(u => u.id_usuario === 6)) {
-            this.usuarios.push({
-              id_usuario: 6,
-              nombre_completo: "Valentina Castro Rincón (Gestora de Operaciones & UBL)",
-              email: "valentina.castro@tlm.net.co",
-              hashed_password: "colab_valentina_token",
-              rol: "Analista",
-              activo: true,
-              empresas_ids: [1, 2],
-              permisos: {
-                ...getDefaultPermissions('Analista'),
-                auditoria_ubl: true,
-                impuestos_f350: true,
-                conciliacion_bancaria: true
-              }
-            });
-          }
-
-          this.empresas = dump.empresas;
-          this.facturas = dump.facturas || [];
-          this.cuentasPUC = dump.cuentasPUC || [];
-          this.balanceTerceros = dump.balanceTerceros || [];
-          this.movimientosBanco = dump.movimientosBanco || [];
-          this.movimientosLibro = dump.movimientosLibro || [];
-          this.modificaciones = dump.modificaciones || [];
-          this.notificacionesSeguridad = dump.notificacionesSeguridad || [];
-
-          if (this.modificaciones.length === 0) {
-            this.initSeedModificaciones();
-          }
-
-          if (this.notificacionesSeguridad.length === 0) {
-            this.notificacionesSeguridad = [
-              {
-                id: "sec-seed-1",
-                destinatario: "andres.morales@tlm.net.co",
-                asunto: "Credenciales de Acceso a Consola TLM - Contraseña Provisional Asignada por Juan",
-                fecha: new Date(Date.now() - 3600000 * 2).toISOString(),
-                tipo: "NUEVO_USUARIO",
-                mensaje: "Estimado/a Andrés Felipe Morales, Juan Yaya (Administrador Maestro) ha habilitado tu acceso a la Consola TLM Enterprise con contraseña provisional. Se requerirá cambio obligatorio alfanumérico al primer inicio.",
-                estado: "ENVIADO"
-              },
-              {
-                id: "sec-seed-2",
-                destinatario: "automatizaciones@tlm.net.co",
-                asunto: "Código de Seguridad [748291] para Recuperación de Contraseña - TLM",
-                fecha: new Date(Date.now() - 3600000).toISOString(),
-                tipo: "CODIGO_RECUPERACION",
-                codigo_otp: "748291",
-                mensaje: "Hola Juan Yaya, has solicitado recuperar tu contraseña corporativa. Tu código de seguridad confidencial es: [748291]. Válido por 15 minutos.",
-                estado: "ENVIADO"
-              }
-            ];
-          }
-
-          return true;
+        // Asegurar que los 2 nuevos colaboradores existen
+        if (!this.usuarios.find(u => u.id_usuario === 5)) {
+          this.usuarios.push({
+            id_usuario: 5,
+            nombre_completo: "Andrés Felipe Morales (Especialista Tributario)",
+            email: "andres.morales@tlm.net.co",
+            hashed_password: "colab_andres_token",
+            rol: "Contador",
+            activo: true,
+            empresas_ids: [1, 2],
+            permisos: getDefaultPermissions('Contador')
+          });
         }
+
+        if (!this.usuarios.find(u => u.id_usuario === 6)) {
+          this.usuarios.push({
+            id_usuario: 6,
+            nombre_completo: "Valentina Castro Rincón (Gestora de Operaciones & UBL)",
+            email: "valentina.castro@tlm.net.co",
+            hashed_password: "colab_valentina_token",
+            rol: "Analista",
+            activo: true,
+            empresas_ids: [1, 2],
+            permisos: {
+              ...getDefaultPermissions('Analista'),
+              auditoria_ubl: true,
+              impuestos_f350: true,
+              conciliacion_bancaria: true
+            }
+          });
+        }
+
+        this.empresas = dump.empresas;
+        this.facturas = dump.facturas || [];
+        this.cuentasPUC = dump.cuentasPUC || [];
+        this.balanceTerceros = dump.balanceTerceros || [];
+        this.movimientosBanco = dump.movimientosBanco || [];
+        this.movimientosLibro = dump.movimientosLibro || [];
+        this.modificaciones = dump.modificaciones || [];
+        this.notificacionesSeguridad = dump.notificacionesSeguridad || [];
+
+        if (this.modificaciones.length === 0) {
+          this.initSeedModificaciones();
+        }
+
+        if (this.notificacionesSeguridad.length === 0) {
+          this.notificacionesSeguridad = [
+            {
+              id: "sec-seed-1",
+              destinatario: "andres.morales@tlm.net.co",
+              asunto: "Credenciales de Acceso a Consola TLM - Contraseña Provisional Asignada por Juan",
+              fecha: new Date(Date.now() - 3600000 * 2).toISOString(),
+              tipo: "NUEVO_USUARIO",
+              mensaje: "Estimado/a Andrés Felipe Morales, Juan Yaya (Administrador Maestro) ha habilitado tu acceso a la Consola TLM Enterprise con contraseña provisional. Se requerirá cambio obligatorio alfanumérico al primer inicio.",
+              estado: "ENVIADO"
+            },
+            {
+              id: "sec-seed-2",
+              destinatario: "automatizaciones@tlm.net.co",
+              asunto: "Código de Seguridad [748291] para Recuperación de Contraseña - TLM",
+              fecha: new Date(Date.now() - 3600000).toISOString(),
+              tipo: "CODIGO_RECUPERACION",
+              codigo_otp: "748291",
+              mensaje: "Hola Juan Yaya, has solicitado recuperar tu contraseña corporativa. Tu código de seguridad confidencial es: [748291]. Válido por 15 minutos.",
+              estado: "ENVIADO"
+            }
+          ];
+        }
+
+        return true;
       }
     } catch (e) {
       console.warn("[DataStore] No se pudo cargar de disco, usando seeds iniciales:", e);
@@ -257,7 +298,7 @@ class DataStore {
   public getDatabaseInfo() {
     return {
       motor: "Consola TLM Enterprise Storage Engine",
-      ubicacion: this.dbFilePath,
+      ubicacion: this.pgStore ? "PostgreSQL (Neon) - tabla tlm_estado" : this.dbFilePath,
       servidor: "Node.js v" + process.versions.node + " / Express 4.x Microservice",
       formato: "JSON Relacional Transaccional con RLS Multi-Tenant",
       persistente_en_disco: fs.existsSync(this.dbFilePath),
