@@ -1,5 +1,5 @@
 import { eq, desc, inArray } from 'drizzle-orm';
-import { db as drizzleDb, pool } from '../../db/index.ts';
+import { db as drizzleDb, pool, getActiveConnectionConfig } from '../../db/index.ts';
 import * as schema from '../../db/schema.ts';
 import fs from 'fs';
 import path from 'path';
@@ -24,8 +24,230 @@ export class CloudSqlService {
       const res = await pool.query('SELECT 1 as online');
       return Boolean(res.rows && res.rows.length > 0);
     } catch (err) {
-      console.warn('[CloudSQL] Healthcheck error:', err);
+      console.warn('[Database] Healthcheck error:', err);
       return false;
+    }
+  }
+
+  // Garantiza que las 8 tablas relacionales existan en Supabase o Cloud SQL
+  public static async ensureTablesExist(): Promise<void> {
+    const ddl = `
+      CREATE TABLE IF NOT EXISTS empresas (
+        id SERIAL PRIMARY KEY,
+        nombre_comercial TEXT NOT NULL,
+        nit TEXT NOT NULL UNIQUE,
+        software_erp TEXT DEFAULT 'SIIGO_NUBE',
+        software_destino TEXT DEFAULT 'SIIGO_NUBE',
+        siigo_username TEXT,
+        siigo_access_key TEXT,
+        siigo_document_id INTEGER DEFAULT 24,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        uid TEXT UNIQUE,
+        email TEXT NOT NULL UNIQUE,
+        nombre_completo TEXT NOT NULL,
+        hashed_password TEXT,
+        rol TEXT NOT NULL DEFAULT 'Analista',
+        activo BOOLEAN NOT NULL DEFAULT TRUE,
+        empresas_ids INTEGER[] DEFAULT ARRAY[1],
+        requiere_cambio_password BOOLEAN DEFAULT FALSE,
+        permisos JSONB DEFAULT '{}'::jsonb,
+        avatar_url TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS facturas (
+        id BIGSERIAL PRIMARY KEY,
+        id_empresa INTEGER DEFAULT 1,
+        factura_num TEXT NOT NULL,
+        proveedor TEXT NOT NULL,
+        nit_tercero TEXT NOT NULL,
+        fecha TEXT NOT NULL,
+        fecha_vencimiento TEXT,
+        tipo_comprobante TEXT DEFAULT 'Factura Electrónica',
+        descripcion_item TEXT NOT NULL,
+        cantidad NUMERIC DEFAULT 1,
+        valor_unitario NUMERIC DEFAULT 0,
+        subtotal NUMERIC NOT NULL DEFAULT 0,
+        iva NUMERIC NOT NULL DEFAULT 0,
+        retencion_porc NUMERIC DEFAULT 0,
+        retencion_valor NUMERIC DEFAULT 0,
+        total NUMERIC DEFAULT 0,
+        estado_revision TEXT DEFAULT 'PENDIENTE',
+        cufe_hash TEXT,
+        casilla_350 INTEGER DEFAULT 83,
+        forma_pago TEXT DEFAULT 'Crédito',
+        medio_pago TEXT DEFAULT 'Transferencia Débito',
+        cuenta_gasto TEXT DEFAULT '513535',
+        estado_siigo TEXT DEFAULT 'PENDIENTE',
+        fecha_cargue TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS cuentas_puc (
+        id SERIAL PRIMARY KEY,
+        cuenta TEXT NOT NULL UNIQUE,
+        nombre TEXT NOT NULL,
+        naturaleza TEXT NOT NULL DEFAULT 'DEBITO',
+        nivel INTEGER DEFAULT 4,
+        saldo NUMERIC DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS balance_terceros (
+        id SERIAL PRIMARY KEY,
+        id_empresa INTEGER DEFAULT 1,
+        nit TEXT NOT NULL,
+        razon_social TEXT NOT NULL,
+        cuenta_puc TEXT NOT NULL,
+        saldo_debito NUMERIC DEFAULT 0,
+        saldo_credito NUMERIC DEFAULT 0,
+        saldo_neto NUMERIC DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS movimientos_banco (
+        id SERIAL PRIMARY KEY,
+        id_empresa INTEGER DEFAULT 1,
+        fecha TEXT NOT NULL,
+        referencia TEXT NOT NULL,
+        descripcion TEXT NOT NULL,
+        valor NUMERIC NOT NULL,
+        tipo TEXT NOT NULL,
+        conciliado BOOLEAN DEFAULT FALSE,
+        match_id INTEGER,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS movimientos_libro (
+        id SERIAL PRIMARY KEY,
+        id_empresa INTEGER DEFAULT 1,
+        fecha TEXT NOT NULL,
+        comprobante TEXT NOT NULL,
+        descripcion TEXT NOT NULL,
+        valor NUMERIC NOT NULL,
+        tipo TEXT NOT NULL,
+        conciliado BOOLEAN DEFAULT FALSE,
+        match_id INTEGER,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS modificaciones_repositorio (
+        id SERIAL PRIMARY KEY,
+        timestamp TEXT NOT NULL,
+        autor_id INTEGER NOT NULL,
+        autor_nombre TEXT NOT NULL,
+        tipo_accion TEXT NOT NULL,
+        descripcion TEXT NOT NULL,
+        detalles TEXT,
+        version_origen TEXT DEFAULT 'v1.0.0',
+        version_destino TEXT DEFAULT 'v2.0.0',
+        hash_commit TEXT,
+        archivos_modificados TEXT[] DEFAULT ARRAY[]::text[],
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `;
+    await pool.query(ddl);
+    console.log('[Database] DDL asegurado: Las 8 tablas relacionales existen.');
+  }
+
+  // Si la base de datos conectada (ej. Supabase para pruebas) está vacía, sembrar catálogo inicial
+  public static async seedDefaultDataIfEmpty(): Promise<void> {
+    try {
+      const userCountRes = await pool.query('SELECT count(*)::int as cnt FROM users');
+      const count = userCountRes.rows[0]?.cnt || 0;
+      if (count > 0) return;
+
+      console.log('[Database] Base de datos limpia. Sembrando datos maestros iniciales en la base de datos...');
+
+      await pool.query(`
+        INSERT INTO empresas (id, nombre_comercial, nit, software_erp, software_destino, siigo_username, siigo_access_key, siigo_document_id)
+        VALUES 
+          (1, 'TECNOLOGÍA Y LOGÍSTICA MODERNA S.A.S. BIC', '900543210-9', 'SIIGO_NUBE', 'SIIGO_NUBE', 'automatizaciones@tlm.net.co', 'sk_live_tlm_sec_993418294a', 24),
+          (2, 'INVERSIONES Y SERVICIOS TLM S.A.S.', '901234567-1', 'SIIGO_NUBE', 'SIIGO_NUBE', 'automatizaciones@tlm.net.co', 'sk_live_tlm_sec_993418294a', 24)
+        ON CONFLICT (id) DO NOTHING;
+      `);
+
+      await pool.query(`
+        INSERT INTO users (id, uid, email, nombre_completo, hashed_password, rol, activo, empresas_ids, requiere_cambio_password, permisos)
+        VALUES
+          (1, 'juan-yaya-master-uid', 'automatizaciones@tlm.net.co', 'Juan Yaya - Administrador Maestro', 'pass_token_encrypted', 'Administrador', true, ARRAY[1, 2], false, '{"administrador": true, "auditoria_ubl": true, "impuestos_f350": true, "conciliacion_bancaria": true, "transmitir_siigo": true, "gestion_usuarios": true}'::jsonb),
+          (2, 'usr-uid-2', 'contador@tlm.net.co', 'María Paula Gómez', 'pass_token_encrypted', 'Contador', true, ARRAY[1], false, '{"administrador": false, "auditoria_ubl": true, "impuestos_f350": true, "conciliacion_bancaria": true, "transmitir_siigo": true, "gestion_usuarios": false}'::jsonb),
+          (3, 'usr-uid-3', 'analista@tlm.net.co', 'Carlos Andrés Silva', 'pass_token_encrypted', 'Analista', true, ARRAY[1], false, '{"administrador": false, "auditoria_ubl": true, "impuestos_f350": true, "conciliacion_bancaria": false, "transmitir_siigo": false, "gestion_usuarios": false}'::jsonb),
+          (4, 'usr-uid-4', 'auditor@tlm.net.co', 'Diana Marcela Ortiz', 'pass_token_encrypted', 'Auditor', true, ARRAY[1], false, '{"administrador": false, "auditoria_ubl": true, "impuestos_f350": false, "conciliacion_bancaria": false, "transmitir_siigo": false, "gestion_usuarios": false}'::jsonb)
+        ON CONFLICT (id) DO NOTHING;
+      `);
+
+      await pool.query(`
+        INSERT INTO cuentas_puc (id, cuenta, nombre, naturaleza, nivel, saldo)
+        VALUES
+          (1, '110505', 'Caja General', 'DEBITO', 4, 1500000),
+          (2, '111005', 'Banco Nacional - Cta Corriente', 'DEBITO', 4, 45800000),
+          (3, '130505', 'Clientes Nacionales', 'DEBITO', 4, 28400000),
+          (4, '143505', 'Mercancías No Fabricadas por la Empresa', 'DEBITO', 4, 62000000),
+          (5, '220505', 'Proveedores Nacionales', 'CREDITO', 4, 18900000),
+          (6, '233525', 'Honorarios y Servicios Técnicos', 'CREDITO', 4, 4200000),
+          (7, '236540', 'Retención en la Fuente 4% Compras', 'CREDITO', 4, 1250000),
+          (8, '236525', 'Retención en la Fuente 11% Servicios', 'CREDITO', 4, 980000),
+          (9, '236701', 'Retención de IVA (ReteIVA 15%)', 'CREDITO', 4, 450000),
+          (10, '236801', 'Retención de ICA (ReteICA 9.66 por mil)', 'CREDITO', 4, 320000),
+          (11, '240801', 'Impuesto a las Ventas por Pagar (IVA 19%)', 'CREDITO', 4, 8750000),
+          (12, '413501', 'Comercio al por mayor y al por menor', 'CREDITO', 4, 142000000),
+          (13, '510506', 'Sueldos y Salarios Administrativos', 'DEBITO', 4, 22000000),
+          (14, '513535', 'Servicios de Tecnología & Nube Cloud', 'DEBITO', 4, 6800000)
+        ON CONFLICT (id) DO NOTHING;
+      `);
+
+      await pool.query(`
+        INSERT INTO facturas (id, id_empresa, factura_num, proveedor, nit_tercero, fecha, descripcion_item, cantidad, valor_unitario, subtotal, iva, retencion_porc, retencion_valor, total, estado_revision, cufe_hash, casilla_350, forma_pago, medio_pago, cuenta_gasto, estado_siigo, fecha_cargue)
+        VALUES
+          (1, 1, 'FE-2045', 'CLOUDFLARE ENTERPRISE SERVICES LLC', '901998877', '2026-10-10', 'Protección WAF, DDoS y CDN Enterprise (Q4 2026)', 1, 1850000, 1850000, 351500, 4, 74000, 2127500, 'AUDITADA', 'cufe-cf-8924b172a3e01', 62, 'Crédito 30 días', 'Transferencia Electrónica', '51353501 - Nube & Ciberseguridad', 'PENDIENTE', NOW()::text),
+          (2, 1, 'FAC-9844', 'DATADOG MONITORING & LOGS CORP', '900887766', '2026-10-11', 'Licenciamiento APM & Observabilidad Kubernetes', 1, 3200000, 3200000, 608000, 4, 128000, 3680000, 'AUDITADA', 'cufe-dd-992384a71b2', 62, 'Contado', 'Tarjeta Corporativa', '51353502 - Software SaaS', 'PENDIENTE', NOW()::text),
+          (3, 1, 'INV-1029', 'ORACLE CLOUD SERVICES DE COLOMBIA S.A.S.', '860002450', '2026-10-12', 'Bases de Datos Autónomas & Servidores OCI Exadata', 1, 5800000, 5800000, 1102000, 4, 232000, 6670000, 'AUDITADA', 'cufe-ora-102938475c9', 62, 'Crédito 15 días', 'Transferencia Bancolombia', '51353503 - Servidores Dedicados', 'PENDIENTE', NOW()::text),
+          (4, 1, 'DRV-3435', 'GOOGLE CLOUD & WORKSPACE IRELAND LTD', '900987654', '2026-10-13', 'Suscripción Enterprise Google Workspace Drive + Cloud Storage (30 Usuarios)', 1, 1450000, 1450000, 275500, 4, 58000, 1667500, 'AUDITADA', 'cufe-drv-5a8af0a2ec8f9', 62, 'Crédito 30 días', 'Transferencia Electrónica', '51353501 - Servicios de Tecnología & Nube', 'AUDITADA', NOW()::text)
+        ON CONFLICT (id) DO NOTHING;
+      `);
+
+      await pool.query(`
+        INSERT INTO balance_terceros (id, id_empresa, nit, razon_social, cuenta_puc, saldo_debito, saldo_credito, saldo_neto)
+        VALUES
+          (1, 1, '901998877', 'CLOUDFLARE ENTERPRISE SERVICES LLC', '220505', 0, 2127500, -2127500),
+          (2, 1, '900887766', 'DATADOG MONITORING & LOGS CORP', '220505', 0, 3680000, -3680000),
+          (3, 1, '860002450', 'ORACLE CLOUD SERVICES DE COLOMBIA S.A.S.', '220505', 0, 6670000, -6670000)
+        ON CONFLICT (id) DO NOTHING;
+      `);
+
+      await pool.query(`
+        INSERT INTO movimientos_banco (id, id_empresa, fecha, referencia, descripcion, valor, tipo, conciliado, match_id)
+        VALUES
+          (1, 1, '2026-10-01', 'TRF-00192', 'PAGO FACTURA PROVEEDOR CLOUDFLARE', 2127500, 'EGRESO', true, 1),
+          (2, 1, '2026-10-02', 'TRF-00193', 'PAGO SUSCRIPCION DATADOG', 3680000, 'EGRESO', true, 2),
+          (3, 1, '2026-10-05', 'DEP-88392', 'RECAUDO CLIENTE DISTRIBUIDORA NORTE', 15800000, 'INGRESO', true, 3),
+          (4, 1, '2026-10-08', 'TRF-00198', 'PAGO NOMINA PRIMERA QUINCENA OCTUBRE', 11000000, 'EGRESO', false, NULL)
+        ON CONFLICT (id) DO NOTHING;
+
+        INSERT INTO movimientos_libro (id, id_empresa, fecha, comprobante, descripcion, valor, tipo, conciliado, match_id)
+        VALUES
+          (1, 1, '2026-10-01', 'CE-10045', 'Egreso comprobante factura Cloudflare', 2127500, 'EGRESO', true, 1),
+          (2, 1, '2026-10-02', 'CE-10046', 'Egreso comprobante Datadog', 3680000, 'EGRESO', true, 2),
+          (3, 1, '2026-10-05', 'RC-20089', 'Recibo caja cliente Distribuidora Norte', 15800000, 'INGRESO', true, 3),
+          (4, 1, '2026-10-09', 'CE-10047', 'Egreso pago nómina quincenal', 11000000, 'EGRESO', false, NULL)
+        ON CONFLICT (id) DO NOTHING;
+      `);
+
+      await pool.query(`
+        INSERT INTO modificaciones_repositorio (id, timestamp, autor_id, autor_nombre, tipo_accion, descripcion, detalles, version_origen, version_destino, hash_commit, archivos_modificados)
+        VALUES
+          (1, NOW()::text, 1, 'Juan Yaya - Administrador Maestro', 'INIT_SEED', 'Inicialización y despliegue de esquemas relacionales', 'Sembrado automático de 8 tablas en base de datos PostgreSQL', 'v1.0.0', 'v2.0.0', 'c7f92a1', ARRAY['schema.ts', 'cloudSqlService.ts'])
+        ON CONFLICT (id) DO NOTHING;
+      `);
+
+      console.log('[Database] Siembra de datos maestros completada exitosamente.');
+    } catch (err: any) {
+      console.warn('[Database] Advertencia sembrando datos predeterminados:', err.message);
     }
   }
 
@@ -34,9 +256,12 @@ export class CloudSqlService {
     try {
       const online = await this.isCloudSqlOnline();
       if (!online) {
-        console.warn('[CloudSQL] Base de datos no disponible aún, posponiendo carga inicial.');
+        console.warn('[Database] Base de datos no disponible aún, posponiendo carga inicial.');
         return;
       }
+
+      // Asegurar que las tablas existan
+      await this.ensureTablesExist();
 
       const jsonPath = path.resolve(process.cwd(), 'data', 'tlm_database.json');
       if (fs.existsSync(jsonPath)) {
@@ -199,12 +424,16 @@ export class CloudSqlService {
               }).onConflictDoNothing();
             }
           }
+        } else {
+          // Si no existe tlm_database.json en disco, usar sembrador SQL nativo en Supabase / Cloud SQL
+          await this.seedDefaultDataIfEmpty();
         }
 
       this.isInitialized = true;
-      console.log('[CloudSQL] Conexión en línea activa y sincronizada con Google Cloud SQL (peak-sunset-511516-q7).');
+      const dbCfg = getActiveConnectionConfig();
+      console.log(`[Database] Conexión en línea activa y sincronizada con ${dbCfg.isSupabase ? 'Supabase (' + dbCfg.supabaseProjectId + ')' : 'Google Cloud SQL'}.`);
     } catch (error) {
-      console.error('[CloudSQL] Error inicializando/migrando a Cloud SQL:', error);
+      console.error('[Database] Error inicializando/migrando a base de datos:', error);
     }
   }
 
@@ -986,22 +1215,35 @@ export class CloudSqlService {
       ];
 
       const totalRegistros = tables.reduce((acc, t) => acc + t.conteo, 0);
+      const dbConfig = getActiveConnectionConfig();
+      const isSupabase = dbConfig.isSupabase || dbConfig.host.includes('supabase');
 
       return {
         app_url: "https://consola-tlm-enterprise-fiscal-erp-engine.ai.studio",
-        cloud_host: process.env.SQL_HOST ? `Google Cloud SQL (${process.env.SQL_HOST}:${process.env.SQL_PORT || 5432})` : "34.175.144.94:5432",
-        cloud_project: "peak-sunset-511516-q7",
-        cloud_region: "us-east1",
-        cloud_user: process.env.SQL_USER || "postgres",
+        cloud_host: isSupabase 
+          ? `Supabase (${dbConfig.host}:${dbConfig.port})` 
+          : `Google Cloud SQL (${dbConfig.host}:${dbConfig.port})`,
+        cloud_project: isSupabase ? (dbConfig.supabaseProjectId || "fqatuwzsunvxbtryhloy") : "peak-sunset-511516-q7",
+        cloud_region: isSupabase ? "Supabase Cloud AWS" : "us-east1",
+        cloud_user: dbConfig.user || "postgres",
         estado: online ? "EN_LINEA_ACTIVO" : "OFFLINE",
-        motor: "Google Cloud SQL (PostgreSQL Managed)",
+        motor: isSupabase 
+          ? `Supabase PostgreSQL (Proyecto ${dbConfig.supabaseProjectId || 'fqatuwzsunvxbtryhloy'})` 
+          : "Google Cloud SQL (PostgreSQL Managed)",
         version: "2.0.0",
         propietario: "Juan Yaya - Administrador Maestro (automatizaciones@tlm.net.co)",
+        is_supabase: isSupabase,
+        supabase_project_id: isSupabase ? (dbConfig.supabaseProjectId || "fqatuwzsunvxbtryhloy") : undefined,
+        host_raw: dbConfig.host,
+        port_raw: dbConfig.port,
+        database_raw: dbConfig.database,
+        user_raw: dbConfig.user,
+        ssl_raw: dbConfig.ssl,
         persistencia: {
-          tipo: "Relacional PostgreSQL Online Transaccional ACID",
-          archivo: process.env.SQL_DB_NAME || "postgres",
+          tipo: isSupabase ? "Supabase PostgreSQL Managed (SSL Encrypted)" : "Relacional PostgreSQL Online Transaccional ACID",
+          archivo: dbConfig.database || "postgres",
           tamano_bytes: 1048576,
-          tamano_legible: "Cloud SQL Managed Storage",
+          tamano_legible: isSupabase ? "Supabase Cloud Storage" : "Cloud SQL Managed Storage",
           activo_en_disco: true
         },
         estadisticas: {

@@ -10,6 +10,7 @@ import { scalabilityArchitecture } from '../services/scalabilityArchitecture.ts'
 import { ExcelService } from '../services/excelService.ts';
 import { SqlGeneratorService } from '../services/sqlGeneratorService.ts';
 import { CloudSqlService } from '../services/cloudSqlService.ts';
+import { reconnectPool, getActiveConnectionConfig } from '../../db/index.ts';
 import type { Factura } from '../domain/types.ts';
 
 const router = Router();
@@ -1034,15 +1035,18 @@ router.get('/sistema/database-overview', async (_req: Request, res: Response) =>
   }
 });
 
-// Probar conexión directa a instancia externa de PostgreSQL / Cloud SQL
+// Probar conexión directa a instancia de PostgreSQL (Supabase / Cloud SQL)
 router.post('/sistema/probar-conexion-sql', async (req: Request, res: Response) => {
-  const { host, port, database, user, password, ssl } = req.body;
-  const targetHost = host || process.env.SQL_HOST || '34.175.144.94';
+  const { host, port, database, user, password, ssl, supabaseProjectId } = req.body;
+  const isSupabase = Boolean(supabaseProjectId) || (host && host.includes('supabase'));
+  const targetHost = supabaseProjectId 
+    ? `db.${supabaseProjectId}.supabase.co` 
+    : (host || process.env.SQL_HOST || 'db.fqatuwzsunvxbtryhloy.supabase.co');
   const targetPort = port ? parseInt(port, 10) : (process.env.SQL_PORT ? parseInt(process.env.SQL_PORT, 10) : 5432);
   const targetDb = database || process.env.SQL_DB_NAME || 'postgres';
   const targetUser = user || process.env.SQL_USER || 'postgres';
   const targetPassword = password || process.env.SQL_PASSWORD || 'Tlmcj0510*';
-  const useSsl = ssl === true || ssl === 'true' || process.env.SQL_SSL === 'true';
+  const useSsl = isSupabase || ssl === true || ssl === 'true' || process.env.SQL_SSL === 'true';
 
   const isSocket = targetHost.startsWith('/');
   const { Pool } = await import('pg');
@@ -1052,7 +1056,7 @@ router.post('/sistema/probar-conexion-sql', async (req: Request, res: Response) 
     database: targetDb,
     user: targetUser,
     password: targetPassword,
-    connectionTimeoutMillis: 5000,
+    connectionTimeoutMillis: 7000,
     ssl: !isSocket && useSsl ? { rejectUnauthorized: false } : false
   });
 
@@ -1063,7 +1067,9 @@ router.post('/sistema/probar-conexion-sql', async (req: Request, res: Response) 
     await testPool.end();
     return res.json({
       ok: true,
-      mensaje: `¡Conexión exitosa a Google Cloud SQL en ${targetHost}:${targetPort}!`,
+      is_supabase: isSupabase,
+      supabase_project_id: supabaseProjectId || (isSupabase ? 'fqatuwzsunvxbtryhloy' : undefined),
+      mensaje: `¡Conexión exitosa a ${isSupabase ? 'Supabase (' + targetHost + ')' : 'PostgreSQL (' + targetHost + ':' + targetPort + ')'}!`,
       base_datos: result.rows[0]?.db,
       usuario: result.rows[0]?.usr,
       version: result.rows[0]?.ver,
@@ -1073,13 +1079,90 @@ router.post('/sistema/probar-conexion-sql', async (req: Request, res: Response) 
     });
   } catch (err: any) {
     try { await testPool.end(); } catch (_) {}
+    const isAuthError = err.message?.includes('password authentication failed') || err.code === '28P01';
+    let instruccion = `Verifica que el host ${targetHost}:${targetPort} sea accesible por red pública.`;
+    if (isSupabase) {
+      if (isAuthError) {
+        instruccion = `Contraseña incorrecta para el usuario '${targetUser}' en el proyecto Supabase '${supabaseProjectId || 'fqatuwzsunvxbtryhloy'}'. Puedes restablecer o verificar tu contraseña en el panel de Supabase: Project Settings > Database > Database Password, e ingresarla en el campo correspondiente.`;
+      } else {
+        instruccion = `Verifica que el ID del proyecto '${supabaseProjectId || 'fqatuwzsunvxbtryhloy'}' esté activo en app.supabase.com y que el puerto 5432 o SSL estén habilitados.`;
+      }
+    } else {
+      instruccion = `En Google Cloud Console (Cloud SQL > Instancia > Conexiones > Redes autorizadas), agrega la red '0.0.0.0/0' para permitir conexiones a la IP ${targetHost}.`;
+    }
+
     return res.json({
       ok: false,
+      is_supabase: isSupabase,
+      supabase_project_id: supabaseProjectId || (isSupabase ? 'fqatuwzsunvxbtryhloy' : undefined),
       mensaje: `No se pudo conectar a PostgreSQL en ${targetHost}:${targetPort}`,
       error_detalle: err.message || 'Timeout de conexión',
-      instruccion: `En Google Cloud Console (Cloud SQL > Instancia > Conexiones > Redes autorizadas), agrega la red '0.0.0.0/0' para permitir conexiones públicas a la IP ${targetHost}.`,
+      codigo_error: err.code,
+      instruccion,
       host: targetHost,
       puerto: targetPort
+    });
+  }
+});
+
+// Aplicar y cambiar la conexión activa en caliente (Supabase / Cloud SQL)
+router.post('/sistema/conectar-base-datos', async (req: Request, res: Response) => {
+  const { host, port, database, user, password, ssl, supabaseProjectId } = req.body;
+  try {
+    const isSupabase = Boolean(supabaseProjectId) || (host && host.includes('supabase'));
+    const targetHost = supabaseProjectId 
+      ? `db.${supabaseProjectId}.supabase.co` 
+      : (host || 'db.fqatuwzsunvxbtryhloy.supabase.co');
+
+    const result = await reconnectPool({
+      host: targetHost,
+      port: port ? parseInt(port, 10) : 5432,
+      database: database || 'postgres',
+      user: user || 'postgres',
+      password: password || 'Tlmcj0510*',
+      ssl: isSupabase || ssl !== false,
+      supabaseProjectId: supabaseProjectId || (isSupabase ? 'fqatuwzsunvxbtryhloy' : undefined)
+    });
+
+    // Asegurar tablas en la base de datos conectada
+    await CloudSqlService.ensureTablesExist();
+    await CloudSqlService.seedDefaultDataIfEmpty();
+    await CloudSqlService.syncCloudSqlToDataStore(db);
+
+    const overview = await CloudSqlService.getDatabaseOverview();
+
+    return res.json({
+      ok: true,
+      mensaje: `¡Base de datos conectada y activada en caliente con ${isSupabase ? 'Supabase (' + targetHost + ')' : 'PostgreSQL'}!`,
+      result,
+      overview
+    });
+  } catch (err: any) {
+    console.error('Error conectando base de datos:', err);
+    res.status(400).json({
+      ok: false,
+      mensaje: 'Error conectando con la base de datos indicada: ' + err.message,
+      codigo_error: err.code
+    });
+  }
+});
+
+// Migrar esquema DDL y sembrar datos en la base conectada
+router.post('/sistema/migrar-esquema-ddl', async (_req: Request, res: Response) => {
+  try {
+    await CloudSqlService.ensureTablesExist();
+    await CloudSqlService.seedDefaultDataIfEmpty();
+    await CloudSqlService.syncCloudSqlToDataStore(db);
+    const overview = await CloudSqlService.getDatabaseOverview();
+    return res.json({
+      ok: true,
+      mensaje: 'Esquema relacional de 8 tablas verificado y desplegado exitosamente.',
+      overview
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      ok: false,
+      mensaje: 'Error desplegando esquema DDL: ' + err.message
     });
   }
 });

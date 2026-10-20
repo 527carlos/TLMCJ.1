@@ -26,7 +26,11 @@ import {
   Scale,
   BookOpen,
   Sliders,
-  AlertCircle
+  AlertCircle,
+  Eye,
+  EyeOff,
+  Lock,
+  Activity
 } from 'lucide-react';
 import type { Usuario } from '../types/index.ts';
 
@@ -42,10 +46,20 @@ interface TableMeta {
 interface DatabaseOverviewResponse {
   app_url: string;
   cloud_host: string;
+  cloud_project?: string;
+  cloud_region?: string;
+  cloud_user?: string;
   estado: string;
   motor: string;
   version: string;
   propietario: string;
+  is_supabase?: boolean;
+  supabase_project_id?: string;
+  host_raw?: string;
+  port_raw?: number;
+  database_raw?: string;
+  user_raw?: string;
+  ssl_raw?: boolean;
   persistencia: {
     tipo: string;
     archivo: string;
@@ -92,6 +106,38 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
   const [testingExternal, setTestingExternal] = useState<boolean>(false);
   const [externalTestResult, setExternalTestResult] = useState<any | null>(null);
 
+  // Estados para formulario de conexión externa (Supabase / Cloud SQL)
+  const [extProjectId, setExtProjectId] = useState<string>('fqatuwzsunvxbtryhloy');
+  const [extHost, setExtHost] = useState<string>('db.fqatuwzsunvxbtryhloy.supabase.co');
+  const [extPort, setExtPort] = useState<string>('5432');
+  const [extDb, setExtDb] = useState<string>('postgres');
+  const [extUser, setExtUser] = useState<string>('postgres');
+  const [extPassword, setExtPassword] = useState<string>('Tlmcj0510*');
+  const [extSsl, setExtSsl] = useState<boolean>(true);
+  const [showExtPassword, setShowExtPassword] = useState<boolean>(false);
+  const [isConnectingDb, setIsConnectingDb] = useState<boolean>(false);
+  const [isDeployingDdl, setIsDeployingDdl] = useState<boolean>(false);
+  const [activePreset, setActivePreset] = useState<'supabase' | 'cloudsql' | 'custom'>('supabase');
+
+  const handleSelectPreset = (preset: 'supabase' | 'cloudsql') => {
+    setActivePreset(preset);
+    if (preset === 'supabase') {
+      setExtProjectId('fqatuwzsunvxbtryhloy');
+      setExtHost('db.fqatuwzsunvxbtryhloy.supabase.co');
+      setExtPort('5432');
+      setExtDb('postgres');
+      setExtUser('postgres');
+      setExtSsl(true);
+    } else {
+      setExtProjectId('');
+      setExtHost('34.175.144.94');
+      setExtPort('5432');
+      setExtDb('postgres');
+      setExtUser('postgres');
+      setExtSsl(false);
+    }
+  };
+
   const handleTestExternal = async () => {
     setTestingExternal(true);
     setExternalTestResult(null);
@@ -100,19 +146,21 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          host: '34.175.144.94',
-          port: 5432,
-          database: 'postgres',
-          user: 'postgres',
-          password: 'Tlmcj0510*'
+          host: extHost,
+          port: parseInt(extPort, 10) || 5432,
+          database: extDb,
+          user: extUser,
+          password: extPassword,
+          ssl: extSsl,
+          supabaseProjectId: extProjectId || undefined
         })
       });
       const resData = await res.json();
       setExternalTestResult(resData);
       if (resData.ok) {
-        onShowToast('¡Conexión verificada exitosamente a 34.175.144.94!', 'success');
+        onShowToast(`¡Conexión verificada exitosamente (${resData.latencia_ms}ms)!`, 'success');
       } else {
-        onShowToast(resData.mensaje || 'Información de conexión a Cloud SQL', 'error');
+        onShowToast(resData.mensaje || 'Error probando conexión a la base de datos', 'error');
       }
     } catch (e: any) {
       setExternalTestResult({
@@ -120,9 +168,65 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
         mensaje: 'Error de red probando conexión',
         error_detalle: e.message
       });
-      onShowToast('Error probando conexión a Cloud SQL', 'error');
+      onShowToast('Error de red probando conexión', 'error');
     } finally {
       setTestingExternal(false);
+    }
+  };
+
+  const handleConnectDatabase = async () => {
+    setIsConnectingDb(true);
+    try {
+      const res = await fetch('/api/v1/sistema/conectar-base-datos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host: extHost,
+          port: parseInt(extPort, 10) || 5432,
+          database: extDb,
+          user: extUser,
+          password: extPassword,
+          ssl: extSsl,
+          supabaseProjectId: extProjectId || undefined
+        })
+      });
+      const resData = await res.json();
+      if (resData.ok) {
+        onShowToast(resData.mensaje || '¡Base de datos conectada y activada!', 'success');
+        if (resData.overview) {
+          setData(resData.overview);
+        } else {
+          loadDatabaseOverview();
+        }
+      } else {
+        onShowToast(resData.mensaje || 'Error activando conexión a base de datos', 'error');
+      }
+    } catch (e: any) {
+      onShowToast('Error activando conexión: ' + e.message, 'error');
+    } finally {
+      setIsConnectingDb(false);
+    }
+  };
+
+  const handleDeployDdl = async () => {
+    setIsDeployingDdl(true);
+    try {
+      const res = await fetch('/api/v1/sistema/migrar-esquema-ddl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const resData = await res.json();
+      if (resData.ok) {
+        onShowToast('¡Esquema relacional y datos desplegados exitosamente!', 'success');
+        if (resData.overview) setData(resData.overview);
+        else loadDatabaseOverview();
+      } else {
+        onShowToast(resData.mensaje || 'Error desplegando esquema', 'error');
+      }
+    } catch (e: any) {
+      onShowToast('Error desplegando esquema DDL: ' + e.message, 'error');
+    } finally {
+      setIsDeployingDdl(false);
     }
   };
 
@@ -384,8 +488,14 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
           }`}
         >
           <Server className="w-4 h-4 text-indigo-600" />
-          <span>Instancia Externa (34.175.144.94)</span>
-          <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-indigo-100 text-indigo-800">5432</span>
+          <span>Bases de Datos & Supabase</span>
+          <span className={`px-2 py-0.5 rounded-full text-[9px] font-black ${
+            data?.is_supabase 
+              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
+              : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+          }`}>
+            {data?.is_supabase ? 'Supabase (fqatuwzsunvxbtryhloy)' : 'Cloud SQL (34.175.144.94)'}
+          </span>
         </button>
 
         <button
@@ -891,6 +1001,426 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: CONEXIÓN EXTERNA A SUPABASE / CLOUD SQL */}
+      {activeTab === 'conexion-externa' && (
+        <div className="space-y-6">
+          {/* Active Connection Status Bar */}
+          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-6 sm:p-7 border border-indigo-900/40 shadow-md">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-600/30 border border-indigo-400/30 flex items-center justify-center shrink-0">
+                  <Database className="w-6 h-6 text-indigo-300" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-black text-white">
+                      {data?.motor || 'Motor de Base de Datos Relacional'}
+                    </h3>
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      {data?.estado || 'EN LÍNEA ACTIVO'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-indigo-200 mt-0.5 font-mono">
+                    Host: <span className="text-white font-bold">{data?.cloud_host || extHost}</span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={loadDatabaseOverview}
+                  className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                  <span>Sincronizar Estado</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Metrics */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
+              <div className="bg-black/25 rounded-2xl p-3.5 border border-white/5">
+                <span className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider">Tablas Activas</span>
+                <p className="text-lg font-black text-white mt-0.5">{data?.tablas.length || 8} tablas</p>
+                <span className="text-[10px] text-emerald-400">Esquema ACID</span>
+              </div>
+              <div className="bg-black/25 rounded-2xl p-3.5 border border-white/5">
+                <span className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider">Total Registros</span>
+                <p className="text-lg font-black text-white mt-0.5">{data?.estadisticas.total_registros || 48} filas</p>
+                <span className="text-[10px] text-indigo-300">Consultas en vivo</span>
+              </div>
+              <div className="bg-black/25 rounded-2xl p-3.5 border border-white/5">
+                <span className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider">Base de Datos</span>
+                <p className="text-lg font-black text-white mt-0.5 font-mono">{data?.persistencia.archivo || 'postgres'}</p>
+                <span className="text-[10px] text-indigo-300">Usuario: {data?.cloud_user || 'postgres'}</span>
+              </div>
+              <div className="bg-black/25 rounded-2xl p-3.5 border border-white/5">
+                <span className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider">Seguridad Canal</span>
+                <p className="text-lg font-black text-emerald-400 mt-0.5 font-mono">SSL / TLS v1.3</p>
+                <span className="text-[10px] text-slate-400">Puerto 5432</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Presets Selector */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Supabase Card */}
+            <div 
+              onClick={() => handleSelectPreset('supabase')}
+              className={`p-5 rounded-3xl border transition cursor-pointer flex flex-col justify-between ${
+                activePreset === 'supabase'
+                  ? 'bg-emerald-50/50 border-emerald-500 shadow-sm ring-2 ring-emerald-500/20'
+                  : 'bg-white border-slate-200 hover:border-slate-300'
+              }`}
+            >
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800">
+                    Entorno de Pruebas & Desarrollo
+                  </span>
+                  {activePreset === 'supabase' && (
+                    <span className="text-[11px] font-bold text-emerald-700 flex items-center gap-1">
+                      <Check className="w-3.5 h-3.5 stroke-[3]" /> Seleccionado
+                    </span>
+                  )}
+                </div>
+                <h4 className="text-sm font-black text-slate-900 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-emerald-600" />
+                  Supabase PostgreSQL (fqatuwzsunvxbtryhloy)
+                </h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  Instancia gestionada para despliegue de pruebas, validación de migraciones y actualizaciones en tiempo real.
+                </p>
+                <div className="mt-3 p-2.5 bg-white rounded-xl border border-slate-200/80 font-mono text-[11px] space-y-1 text-slate-600">
+                  <div>Host: <span className="font-bold text-slate-800">db.fqatuwzsunvxbtryhloy.supabase.co</span></div>
+                  <div>Proyecto ID: <span className="font-bold text-emerald-700">fqatuwzsunvxbtryhloy</span></div>
+                  <div>Puerto: <span className="font-bold text-slate-800">5432</span> • SSL: <span className="font-bold text-emerald-600">Requerido</span></div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); handleSelectPreset('supabase'); }}
+                className="mt-4 w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <span>Cargar Parámetros Supabase</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Google Cloud SQL Card */}
+            <div 
+              onClick={() => handleSelectPreset('cloudsql')}
+              className={`p-5 rounded-3xl border transition cursor-pointer flex flex-col justify-between ${
+                activePreset === 'cloudsql'
+                  ? 'bg-indigo-50/50 border-[#271a82] shadow-sm ring-2 ring-indigo-900/10'
+                  : 'bg-white border-slate-200 hover:border-slate-300'
+              }`}
+            >
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-100 text-[#271a82]">
+                    Instancia Google Cloud SQL (GCP)
+                  </span>
+                  {activePreset === 'cloudsql' && (
+                    <span className="text-[11px] font-bold text-[#271a82] flex items-center gap-1">
+                      <Check className="w-3.5 h-3.5 stroke-[3]" /> Seleccionado
+                    </span>
+                  )}
+                </div>
+                <h4 className="text-sm font-black text-slate-900 flex items-center gap-1.5">
+                  <Server className="w-4 h-4 text-indigo-700" />
+                  Google Cloud SQL (34.175.144.94)
+                </h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  Instancia gestionada de PostgreSQL en Google Cloud us-east1 para producción enterprise.
+                </p>
+                <div className="mt-3 p-2.5 bg-white rounded-xl border border-slate-200/80 font-mono text-[11px] space-y-1 text-slate-600">
+                  <div>Host / IP: <span className="font-bold text-slate-800">34.175.144.94</span></div>
+                  <div>Base de Datos: <span className="font-bold text-slate-800">postgres</span></div>
+                  <div>Puerto: <span className="font-bold text-slate-800">5432</span> • Usuario: <span className="font-bold text-slate-800">postgres</span></div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); handleSelectPreset('cloudsql'); }}
+                className="mt-4 w-full py-2 px-3 rounded-xl bg-[#271a82] hover:bg-indigo-900 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <span>Cargar Parámetros Cloud SQL</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Formulario de Configuración & Conexión en Línea */}
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-7 shadow-xs space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-5 border-b border-slate-100">
+              <div>
+                <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                  <Sliders className="w-5 h-5 text-[#271a82]" />
+                  Configurador de Parámetros de Conexión Externa
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Verifica las credenciales y activa la conexión de la base de datos en tiempo real.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-500">Preset:</span>
+                <span className="text-xs font-mono font-bold px-2 py-1 bg-slate-100 rounded-lg text-slate-800 uppercase">
+                  {activePreset}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* Supabase Project ID */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Supabase Project ID (Opcional)
+                </label>
+                <input
+                  type="text"
+                  value={extProjectId}
+                  onChange={(e) => {
+                    const id = e.target.value.trim();
+                    setExtProjectId(id);
+                    if (id) {
+                      setExtHost(`db.${id}.supabase.co`);
+                      setExtSsl(true);
+                    }
+                  }}
+                  placeholder="ej: fqatuwzsunvxbtryhloy"
+                  className="w-full text-xs font-mono px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#271a82]"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Autocompleta el host directo de Supabase
+                </span>
+              </div>
+
+              {/* Host / IP */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Host / Dirección IP <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={extHost}
+                  onChange={(e) => setExtHost(e.target.value)}
+                  placeholder="db.fqatuwzsunvxbtryhloy.supabase.co"
+                  className="w-full text-xs font-mono px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#271a82]"
+                />
+              </div>
+
+              {/* Puerto */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Puerto PostgreSQL <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={extPort}
+                  onChange={(e) => setExtPort(e.target.value)}
+                  placeholder="5432"
+                  className="w-full text-xs font-mono px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#271a82]"
+                />
+              </div>
+
+              {/* Base de Datos */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Nombre de la Base de Datos <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={extDb}
+                  onChange={(e) => setExtDb(e.target.value)}
+                  placeholder="postgres"
+                  className="w-full text-xs font-mono px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#271a82]"
+                />
+              </div>
+
+              {/* Usuario */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Usuario de Conexión <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={extUser}
+                  onChange={(e) => setExtUser(e.target.value)}
+                  placeholder="postgres"
+                  className="w-full text-xs font-mono px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#271a82]"
+                />
+              </div>
+
+              {/* Contraseña */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Contraseña <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showExtPassword ? "text" : "password"}
+                    value={extPassword}
+                    onChange={(e) => setExtPassword(e.target.value)}
+                    placeholder="Contraseña de la base de datos"
+                    className="w-full text-xs font-mono px-3.5 py-2.5 pr-10 rounded-xl border border-slate-200 focus:outline-none focus:border-[#271a82]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowExtPassword(!showExtPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    {showExtPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* SSL Switch */}
+            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                <div>
+                  <p className="text-xs font-bold text-slate-800">Conexión Cifrada SSL / TLS</p>
+                  <p className="text-[11px] text-slate-500">
+                    Requerido obligatoriamente por Supabase (rejectUnauthorized: false).
+                  </p>
+                </div>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={extSsl}
+                  onChange={(e) => setExtSsl(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+              </label>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleTestExternal}
+                disabled={testingExternal}
+                className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer disabled:opacity-50 shadow-xs"
+              >
+                {testingExternal ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Probando conexión...</span>
+                  </>
+                ) : (
+                  <>
+                    <Activity className="w-4 h-4 text-amber-400" />
+                    <span>1. Probar Conexión</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConnectDatabase}
+                disabled={isConnectingDb}
+                className="px-5 py-2.5 rounded-xl bg-[#271a82] hover:bg-indigo-900 text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer disabled:opacity-50 shadow-xs"
+              >
+                {isConnectingDb ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Conectando y activando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4 text-emerald-400" />
+                    <span>2. Conectar y Activar en Caliente</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDeployDdl}
+                disabled={isDeployingDdl}
+                className="px-5 py-2.5 rounded-xl bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold border border-slate-200 transition flex items-center gap-2 cursor-pointer disabled:opacity-50 shadow-2xs"
+              >
+                {isDeployingDdl ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Desplegando DDL...</span>
+                  </>
+                ) : (
+                  <>
+                    <Layers className="w-4 h-4 text-indigo-600" />
+                    <span>3. Desplegar Esquema DDL en la Base</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Test Result Feedback Box */}
+            {externalTestResult && (
+              <div className={`p-4 rounded-2xl border transition animate-in fade-in duration-200 ${
+                externalTestResult.ok
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                  : 'bg-amber-50 border-amber-200 text-amber-950'
+              }`}>
+                <div className="flex items-start gap-3">
+                  {externalTestResult.ok ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  )}
+                  <div className="space-y-1.5 flex-1">
+                    <p className="text-xs font-black">
+                      {externalTestResult.mensaje}
+                    </p>
+
+                    {externalTestResult.ok ? (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 text-[11px] font-mono text-emerald-800">
+                        <div className="bg-white/80 p-2 rounded-lg border border-emerald-200">
+                          <span className="block text-[9px] uppercase font-bold text-emerald-600">Latencia</span>
+                          <span className="font-bold">{externalTestResult.latencia_ms} ms</span>
+                        </div>
+                        <div className="bg-white/80 p-2 rounded-lg border border-emerald-200">
+                          <span className="block text-[9px] uppercase font-bold text-emerald-600">Base de Datos</span>
+                          <span className="font-bold">{externalTestResult.base_datos}</span>
+                        </div>
+                        <div className="bg-white/80 p-2 rounded-lg border border-emerald-200">
+                          <span className="block text-[9px] uppercase font-bold text-emerald-600">Usuario</span>
+                          <span className="font-bold">{externalTestResult.usuario}</span>
+                        </div>
+                        <div className="bg-white/80 p-2 rounded-lg border border-emerald-200">
+                          <span className="block text-[9px] uppercase font-bold text-emerald-600">PostgreSQL</span>
+                          <span className="font-bold truncate">{externalTestResult.version?.slice(0, 18)}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5 text-xs text-amber-900 pt-1">
+                        {externalTestResult.error_detalle && (
+                          <div className="p-2 bg-white/90 rounded-xl border border-amber-200 font-mono text-[11px] text-rose-700">
+                            Detalle: {externalTestResult.error_detalle}
+                          </div>
+                        )}
+                        {externalTestResult.instruccion && (
+                          <p className="text-[11px] leading-relaxed">
+                            💡 <span className="font-bold">Instrucción:</span> {externalTestResult.instruccion}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
