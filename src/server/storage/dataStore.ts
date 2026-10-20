@@ -183,7 +183,8 @@ class DataStore {
         this.movimientosBanco = dump.movimientosBanco || [];
         this.movimientosLibro = dump.movimientosLibro || [];
         this.modificaciones = dump.modificaciones || [];
-        this.notificacionesSeguridad = dump.notificacionesSeguridad || [];
+        // Quita códigos de recuperación guardados por versiones anteriores
+        this.notificacionesSeguridad = (dump.notificacionesSeguridad || []).map(({ codigo_otp, ...n }: any) => n);
 
         if (this.modificaciones.length === 0) {
           this.initSeedModificaciones();
@@ -203,11 +204,10 @@ class DataStore {
             {
               id: "sec-seed-2",
               destinatario: "automatizaciones@tlm.net.co",
-              asunto: "Código de Seguridad [748291] para Recuperación de Contraseña - TLM",
+              asunto: "Solicitud de recuperación de contraseña - TLM",
               fecha: new Date(Date.now() - 3600000).toISOString(),
               tipo: "CODIGO_RECUPERACION",
-              codigo_otp: "748291",
-              mensaje: "Hola Juan Yaya, has solicitado recuperar tu contraseña corporativa. Tu código de seguridad confidencial es: [748291]. Válido por 15 minutos.",
+              mensaje: "Se envió un código de recuperación al correo de Juan Yaya. El código no se muestra en esta consola.",
               estado: "ENVIADO"
             }
           ];
@@ -225,7 +225,6 @@ class DataStore {
     destinatario: string;
     asunto: string;
     tipo: NotificacionSeguridad['tipo'];
-    codigo_otp?: string;
     mensaje: string;
   }): NotificacionSeguridad {
     const item: NotificacionSeguridad = {
@@ -234,7 +233,6 @@ class DataStore {
       asunto: notif.asunto,
       fecha: new Date().toISOString(),
       tipo: notif.tipo,
-      codigo_otp: notif.codigo_otp,
       mensaje: notif.mensaje,
       estado: 'ENVIADO'
     };

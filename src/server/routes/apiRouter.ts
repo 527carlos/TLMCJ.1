@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { db, getDefaultPermissions } from '../storage/dataStore.ts';
 import { xmlParser } from '../services/xmlUblParser.ts';
@@ -7,14 +7,76 @@ import { f350TaxEngine } from '../services/f350TaxEngine.ts';
 import { siigoService } from '../services/siigoService.ts';
 import { scalabilityArchitecture } from '../services/scalabilityArchitecture.ts';
 import { Factura } from '../domain/types.ts';
+import crypto from 'crypto';
 import { hashPassword, isHashed, verifyPassword, matchesLegacyPassword } from '../services/passwordHasher.ts';
+import { startSession, endSession, getSessionUser, isAdminUser } from '../services/sessionAuth.ts';
+import { mailer } from '../services/mailer.ts';
+import { Usuario } from '../domain/types.ts';
 
 const router = Router();
 
+// Rutas que no requieren sesión. Todo lo demás de la API exige haber iniciado sesión.
+const PUBLIC_PATHS = new Set([
+  '/auth/login',
+  '/auth/logout',
+  '/auth/sesion',
+  '/auth/register',
+  '/auth/recuperar-password/solicitar-codigo',
+  '/auth/recuperar-password/verificar-y-cambiar'
+]);
+
+// Crear, editar o borrar usuarios, y ver notificaciones de seguridad, solo para administradores
+function isAdminPath(req: Request): boolean {
+  if (req.path === '/auth/notificaciones-seguridad') return true;
+  return req.method !== 'GET' && req.path.startsWith('/auth/usuarios');
+}
+
+router.use((req: Request, res: Response, next: NextFunction) => {
+  if (PUBLIC_PATHS.has(req.path)) return next();
+
+  const user = getSessionUser(req);
+  if (!user) {
+    return res.status(401).json({ detail: "Debes iniciar sesión para continuar." });
+  }
+  if (isAdminPath(req) && !isAdminUser(user)) {
+    return res.status(403).json({ detail: "Solo un administrador puede realizar esta acción." });
+  }
+  (req as any).usuario = user;
+  next();
+});
+
 // Quita hashes y códigos de recuperación antes de enviar un usuario al navegador
 function publicUser(user: any) {
-  const { hashed_password, codigo_recuperacion, codigo_recuperacion_expira, ...safe } = user;
+  const { hashed_password, codigo_recuperacion, codigo_recuperacion_expira, intentos_codigo, ...safe } = user;
   return safe;
+}
+
+// Los códigos de recuperación se guardan con hash, nunca en texto plano
+function hashCodigo(codigo: string): string {
+  return crypto.createHash('sha256').update(codigo.trim()).digest('hex');
+}
+
+function passwordMatches(user: Usuario, password: string): boolean {
+  const stored = user.hashed_password || '';
+  return isHashed(stored)
+    ? verifyPassword(password, stored)
+    : matchesLegacyPassword(password, stored);
+}
+
+// Envía una contraseña provisional por correo. Si el correo no está configurado, la respuesta al administrador la muestra.
+async function enviarProvisionalPorCorreo(user: Usuario, password: string): Promise<boolean> {
+  if (!mailer.enabled) return false;
+  try {
+    await mailer.send(
+      user.email,
+      "Tu acceso a Consola TLM - contraseña provisional",
+      `Hola ${user.nombre_completo},\n\nTu contraseña provisional es: ${password}\n\nAl iniciar sesión deberás cambiarla por una contraseña personal de mínimo 8 caracteres con letras y números.`
+    );
+    return true;
+  } catch (e) {
+    console.warn("[Correo] No se pudo enviar la contraseña provisional:", e);
+    return false;
+  }
 }
 const upload = multer({ limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB support for batch uploads
 
@@ -51,11 +113,7 @@ router.post('/auth/login', (req: Request, res: Response) => {
     return res.status(401).json({ detail: "Credenciales inválidas. Verifica tu correo corporativo." });
   }
 
-  const isMatched = isHashed(user.hashed_password)
-    ? verifyPassword(password, user.hashed_password)
-    : matchesLegacyPassword(password, user.hashed_password);
-
-  if (!isMatched) {
+  if (!passwordMatches(user, password)) {
     return res.status(401).json({ detail: "Contraseña incorrecta. Si la olvidaste, puedes generar un código de recuperación a tu correo corporativo." });
   }
 
@@ -64,6 +122,8 @@ router.post('/auth/login', (req: Request, res: Response) => {
     user.hashed_password = hashPassword(password);
     db.saveToDisk();
   }
+
+  startSession(res, user);
 
   // Verificar si requiere cambio obligatorio de contraseña en primer inicio
   const mustChange = user.requiere_cambio_password === true;
@@ -86,14 +146,12 @@ router.post('/auth/login', (req: Request, res: Response) => {
 });
 
 router.post('/auth/cambiar-password', (req: Request, res: Response) => {
-  const { email, usuario_id, password_actual, nueva_password, confirmar_password } = req.body;
-  const user = db.usuarios.find(u => 
-    (usuario_id && u.id_usuario === Number(usuario_id)) || 
-    (email && u.email.toLowerCase() === email.toLowerCase().trim())
-  );
+  // Solo se cambia la contraseña de la sesión activa, nunca la de otra cuenta
+  const user = (req as any).usuario as Usuario;
+  const { password_actual, nueva_password, confirmar_password } = req.body;
 
-  if (!user) {
-    return res.status(404).json({ detail: "Usuario no encontrado." });
+  if (password_actual && !passwordMatches(user, String(password_actual))) {
+    return res.status(401).json({ detail: "La contraseña actual es incorrecta." });
   }
 
   if (nueva_password !== confirmar_password) {
@@ -134,11 +192,11 @@ router.post('/auth/cambiar-password', (req: Request, res: Response) => {
   res.json({
     ok: true,
     mensaje: "¡Contraseña actualizada con éxito! Tus credenciales ahora están protegidas.",
-    usuario: user
+    usuario: publicUser(user)
   });
 });
 
-router.post('/auth/usuarios/crear-por-admin', (req: Request, res: Response) => {
+router.post('/auth/usuarios/crear-por-admin', async (req: Request, res: Response) => {
   const { nombre_completo, email, rol, password_provisional, empresas_ids, autor_id, autor_nombre } = req.body;
 
   if (!nombre_completo || !email || !password_provisional) {
@@ -178,8 +236,10 @@ router.post('/auth/usuarios/crear-por-admin', (req: Request, res: Response) => {
     destinatario: nuevoUsuario.email,
     asunto: "Credenciales de Acceso a Consola TLM - Contraseña Provisional",
     tipo: "NUEVO_USUARIO",
-    mensaje: `Estimado/a ${nuevoUsuario.nombre_completo}, Juan Yaya (Administrador Maestro) ha habilitado tu acceso a la Consola TLM Enterprise. Tu contraseña provisional es: "${password_provisional}". IMPORTANTE: Al iniciar sesión por primera vez, el sistema te solicitará obligatoriamente cambiarla por una contraseña alfanumérica personal de mínimo 8 caracteres.`
+    mensaje: `Estimado/a ${nuevoUsuario.nombre_completo}, Juan Yaya (Administrador Maestro) ha habilitado tu acceso a la Consola TLM Enterprise. La contraseña provisional se entregó por separado. Al iniciar sesión por primera vez, el sistema te solicitará cambiarla por una contraseña personal de mínimo 8 caracteres.`
   });
+
+  const correoEnviado = await enviarProvisionalPorCorreo(nuevoUsuario, password_provisional);
 
   db.addModificacion({
     autor_id: autor_id || 1,
@@ -192,12 +252,15 @@ router.post('/auth/usuarios/crear-por-admin', (req: Request, res: Response) => {
   res.status(201).json({
     ok: true,
     mensaje: `Usuario ${nuevoUsuario.nombre_completo} creado con éxito. Se le asignó contraseña provisional y deberá cambiarla al iniciar sesión.`,
-    usuario: nuevoUsuario,
+    correo_enviado: correoEnviado,
+    // Solo se muestra al administrador cuando no fue posible enviarla por correo
+    password_provisional: correoEnviado ? undefined : password_provisional,
+    usuario: publicUser(nuevoUsuario),
     notificacion: notif
   });
 });
 
-router.post('/auth/usuarios/:id/reset-password-admin', (req: Request, res: Response) => {
+router.post('/auth/usuarios/:id/reset-password-admin', async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
   const { nueva_password_provisional, autor_id, autor_nombre } = req.body;
   const user = db.usuarios.find(u => u.id_usuario === id);
@@ -226,8 +289,10 @@ router.post('/auth/usuarios/:id/reset-password-admin', (req: Request, res: Respo
     destinatario: user.email,
     asunto: "Restablecimiento de Contraseña por Administrador - Consola TLM",
     tipo: "RESET_ADMIN",
-    mensaje: `Hola ${user.nombre_completo}, el Administrador Maestro (Juan Yaya) ha restablecido tu acceso corporativo. Tu nueva contraseña provisional es: "${nueva_password_provisional}". Al iniciar sesión, el sistema te solicitará cambiarla obligatoriamente por una contraseña personal de mínimo 8 caracteres alfanuméricos.`
+    mensaje: `Hola ${user.nombre_completo}, el Administrador Maestro (Juan Yaya) ha restablecido tu acceso corporativo. La nueva contraseña provisional se entregó por separado. Al iniciar sesión, el sistema te solicitará cambiarla obligatoriamente por una contraseña personal de mínimo 8 caracteres alfanuméricos.`
   });
+
+  const correoEnviado = await enviarProvisionalPorCorreo(user, nueva_password_provisional);
 
   db.addModificacion({
     autor_id: autor_id || 1,
@@ -240,51 +305,64 @@ router.post('/auth/usuarios/:id/reset-password-admin', (req: Request, res: Respo
   res.json({
     ok: true,
     mensaje: `Contraseña provisional asignada a ${user.nombre_completo}. Notificación de seguridad generada para ${user.email}.`,
+    correo_enviado: correoEnviado,
+    // Solo se muestra al administrador cuando no fue posible enviarla por correo
+    password_provisional: correoEnviado ? undefined : nueva_password_provisional,
     usuario: publicUser(user),
     notificacion: notif
   });
 });
 
 // Recuperación de Contraseña mediante Código OTP de 6 dígitos
-router.post('/auth/recuperar-password/solicitar-codigo', (req: Request, res: Response) => {
+router.post('/auth/recuperar-password/solicitar-codigo', async (req: Request, res: Response) => {
   const { email } = req.body;
   if (!email) {
     return res.status(400).json({ detail: "Ingresa tu correo electrónico corporativo." });
   }
 
-  const user = db.usuarios.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
-  if (!user) {
-    return res.status(404).json({ detail: "No existe ninguna cuenta corporativa registrada con este correo." });
+  // Sin correo configurado no se puede entregar el código, así que no se genera ninguno
+  if (!mailer.enabled) {
+    return res.status(503).json({ detail: "El envío de códigos por correo no está configurado. Pide al administrador que defina SMTP_HOST en el servidor." });
   }
 
-  if (!user.activo) {
-    return res.status(403).json({ detail: "Esta cuenta está inactiva o pendiente de aprobación por Juan Yaya." });
-  }
-
-  // Generar código OTP seguro de 6 dígitos
-  const codigoOtp = Math.floor(100000 + Math.random() * 900000).toString();
-  const expira = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 minutos
-
-  user.codigo_recuperacion = codigoOtp;
-  user.codigo_recuperacion_expira = expira;
-  db.saveToDisk();
-
-  const notif = db.addNotificacionSeguridad({
-    destinatario: user.email,
-    asunto: `Código de Seguridad [${codigoOtp}] para Recuperación de Contraseña - TLM`,
-    tipo: "CODIGO_RECUPERACION",
-    codigo_otp: codigoOtp,
-    mensaje: `Hola ${user.nombre_completo}, has solicitado restablecer tu contraseña en la Consola TLM. Tu código de seguridad confidencial es: [${codigoOtp}]. Este código expira en 15 minutos. Si tú no realizaste esta solicitud, comunícate de inmediato con Juan Yaya (automatizaciones@tlm.net.co).`
-  });
-
-  res.json({
+  // Misma respuesta exista o no la cuenta, para no revelar qué correos están registrados
+  const respuestaGenerica = {
     ok: true,
-    mensaje: `Se ha enviado un código de seguridad de 6 dígitos al correo corporativo ${user.email}.`,
-    email: user.email,
-    codigo_simulado: codigoOtp,
-    expira_en_minutos: 15,
-    notificacion: notif
+    mensaje: "Si el correo está registrado, recibirás un código de seguridad de 6 dígitos en los próximos minutos.",
+    expira_en_minutos: 15
+  };
+
+  const user = db.usuarios.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
+  if (!user || !user.activo) {
+    return res.json(respuestaGenerica);
+  }
+
+  // Código de 6 dígitos criptográficamente aleatorio
+  const codigoOtp = crypto.randomInt(100000, 1000000).toString();
+
+  try {
+    await mailer.send(
+      user.email,
+      "Código de seguridad - Consola TLM",
+      `Hola ${user.nombre_completo},\n\nTu código de seguridad para restablecer la contraseña es: ${codigoOtp}\n\nExpira en 15 minutos. Si tú no solicitaste este código, ignora este correo y avisa a Juan Yaya (automatizaciones@tlm.net.co).`
+    );
+  } catch (e) {
+    console.warn("[Correo] No se pudo enviar el código de recuperación:", e);
+    return res.status(502).json({ detail: "No pudimos enviar el correo con el código. Intenta más tarde." });
+  }
+
+  // Solo se guarda el hash del código, y se cuentan los intentos fallidos
+  user.codigo_recuperacion = hashCodigo(codigoOtp);
+  user.codigo_recuperacion_expira = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  user.intentos_codigo = 0;
+  db.addNotificacionSeguridad({
+    destinatario: user.email,
+    asunto: "Solicitud de recuperación de contraseña - TLM",
+    tipo: "CODIGO_RECUPERACION",
+    mensaje: `Se envió un código de recuperación al correo de ${user.nombre_completo}. El código no se muestra en esta consola.`
   });
+
+  res.json(respuestaGenerica);
 });
 
 router.post('/auth/recuperar-password/verificar-y-cambiar', (req: Request, res: Response) => {
@@ -295,16 +373,29 @@ router.post('/auth/recuperar-password/verificar-y-cambiar', (req: Request, res: 
   }
 
   const user = db.usuarios.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
-  if (!user) {
-    return res.status(404).json({ detail: "Usuario no encontrado." });
-  }
+  const mensajeCodigoIncorrecto = "El código de seguridad ingresado es incorrecto.";
 
-  if (!user.codigo_recuperacion || user.codigo_recuperacion.trim() !== codigo.toString().trim()) {
-    return res.status(400).json({ detail: "El código de seguridad ingresado es incorrecto." });
+  if (!user || !user.codigo_recuperacion) {
+    return res.status(400).json({ detail: mensajeCodigoIncorrecto });
   }
 
   if (user.codigo_recuperacion_expira && new Date() > new Date(user.codigo_recuperacion_expira)) {
+    user.codigo_recuperacion = null;
+    db.saveToDisk();
     return res.status(400).json({ detail: "El código de seguridad ha expirado (validez: 15 minutos). Solicita un nuevo código." });
+  }
+
+  // Máximo 5 intentos por código; después hay que pedir uno nuevo
+  if ((user.intentos_codigo || 0) >= 5) {
+    user.codigo_recuperacion = null;
+    db.saveToDisk();
+    return res.status(429).json({ detail: "Demasiados intentos fallidos. Solicita un nuevo código de seguridad." });
+  }
+
+  if (user.codigo_recuperacion !== hashCodigo(String(codigo))) {
+    user.intentos_codigo = (user.intentos_codigo || 0) + 1;
+    db.saveToDisk();
+    return res.status(400).json({ detail: mensajeCodigoIncorrecto });
   }
 
   if (nueva_password !== confirmar_password) {
@@ -333,12 +424,26 @@ router.post('/auth/recuperar-password/verificar-y-cambiar', (req: Request, res: 
   res.json({
     ok: true,
     mensaje: "¡Contraseña recuperada y actualizada con éxito! Ya puedes iniciar sesión con tus nuevas credenciales.",
-    usuario: user
+    usuario: publicUser(user)
   });
 });
 
 router.get('/auth/notificaciones-seguridad', (_req: Request, res: Response) => {
   res.json(db.notificacionesSeguridad);
+});
+
+// Usuario de la sesión actual (el navegador lo usa al abrir la página)
+router.get('/auth/sesion', (req: Request, res: Response) => {
+  const user = getSessionUser(req);
+  if (!user) {
+    return res.status(401).json({ detail: "No hay sesión activa." });
+  }
+  res.json(publicUser(user));
+});
+
+router.post('/auth/logout', (_req: Request, res: Response) => {
+  endSession(res);
+  res.json({ ok: true });
 });
 
 router.post('/auth/register', (req: Request, res: Response) => {
@@ -352,7 +457,7 @@ router.post('/auth/register', (req: Request, res: Response) => {
     return res.status(400).json({ detail: "El correo electrónico ya se encuentra registrado." });
   }
 
-  const checkRule = validatePasswordRule(password || 'analista123');
+  const checkRule = validatePasswordRule(password);
   if (!checkRule.ok) {
     return res.status(400).json({ detail: checkRule.message });
   }
@@ -432,7 +537,7 @@ router.patch('/auth/usuarios/:id/toggle-admin', (req: Request, res: Response) =>
   db.saveToDisk();
   res.json({
     mensaje: user.rol === 'Administrador' ? `Permisos de Administrador concedidos a ${user.nombre_completo}.` : `Permisos de Administrador revocados para ${user.nombre_completo}.`,
-    usuario: user
+    usuario: publicUser(user)
   });
 });
 
@@ -450,7 +555,7 @@ router.patch('/auth/usuarios/:id/toggle-activo', (req: Request, res: Response) =
   db.saveToDisk();
   res.json({
     mensaje: user.activo ? `Acceso activado para ${user.nombre_completo}.` : `Acceso suspendido/revocado para ${user.nombre_completo}.`,
-    usuario: user
+    usuario: publicUser(user)
   });
 });
 
@@ -501,7 +606,7 @@ router.patch('/auth/usuarios/:id/avatar', (req: Request, res: Response) => {
     mensaje: avatar_url 
       ? `Imagen corporativa actualizada con éxito para ${user.nombre_completo}.` 
       : `Imagen corporativa removida, mostrando iniciales JY / personalizadas para ${user.nombre_completo}.`,
-    usuario: user
+    usuario: publicUser(user)
   });
 });
 

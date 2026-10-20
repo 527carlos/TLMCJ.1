@@ -74,6 +74,8 @@ export default function App() {
   };
 
   const loadData = async () => {
+    // Sin sesión el servidor responde 401: no se piden datos hasta iniciar sesión
+    if (!currentUser) return;
     setIsRefreshing(true);
     try {
       // 1. Fetch Empresas
@@ -113,9 +115,6 @@ export default function App() {
       const resUsuarios = await fetch('/api/v1/auth/usuarios');
       const dataUsuarios = await resUsuarios.json();
       setUsuarios(dataUsuarios);
-      if (dataUsuarios.length > 0 && !currentUser) {
-        setCurrentUser(dataUsuarios[0]);
-      }
 
       // 7. Initial Conciliacion run
       const resConcil = await fetch('/api/v1/conciliacion/ejecutar', {
@@ -133,9 +132,20 @@ export default function App() {
     }
   };
 
+  // Al abrir la página: recupera la sesión existente o pide iniciar sesión
+  useEffect(() => {
+    fetch('/api/v1/auth/sesion')
+      .then(res => (res.ok ? res.json() : null))
+      .then(user => {
+        if (user) setCurrentUser(user);
+        else setIsAuthModalOpen(true);
+      })
+      .catch(() => setIsAuthModalOpen(true));
+  }, []);
+
   useEffect(() => {
     loadData();
-  }, [activeEmpresa?.id_empresa]);
+  }, [currentUser?.id_usuario, activeEmpresa?.id_empresa]);
 
   // Actions
   const handleUploadXml = async (files: FileList) => {
@@ -551,7 +561,11 @@ export default function App() {
         currentUser={currentUser}
         usuarios={usuarios}
         onSelectUser={(u) => setCurrentUser(u)}
-        onLogout={() => setCurrentUser(null)}
+        onLogout={async () => {
+          await fetch('/api/v1/auth/logout', { method: 'POST' }).catch(() => undefined);
+          setCurrentUser(null);
+          setIsAuthModalOpen(true);
+        }}
         onShowToast={showToast}
         onRefreshUsers={loadData}
         onUpdateAvatar={handleUpdateAvatar}

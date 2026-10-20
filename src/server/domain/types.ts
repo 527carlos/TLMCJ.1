@@ -31,6 +31,7 @@ export interface Usuario {
   requiere_cambio_password?: boolean;
   codigo_recuperacion?: string | null;
   codigo_recuperacion_expira?: string | null;
+  intentos_codigo?: number;
   ultimo_cambio_password?: string;
 }
 

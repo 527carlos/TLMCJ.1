@@ -1100,6 +1100,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           onShowToast(`Usuario pendiente de aprobación por el Administrador Maestro`, 'error');
                           return;
                         }
+                        // Cambiar de usuario sin contraseña no es seguro: el servidor solo acepta la sesión iniciada con clave
+                        if (!isCurrent) {
+                          onShowToast(`Para usar la cuenta de ${u.nombre_completo}, cierra sesión e ingresa con su correo y contraseña.`, 'info');
+                          return;
+                        }
                         if (hasPendingForcedChange) {
                           setMustChangeUser(u);
                           setNuevaPassword('');
@@ -1108,8 +1113,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           onShowToast(`⚠️ ${u.nombre_completo} tiene una contraseña provisional pendiente de cambio.`, 'info');
                           return;
                         }
-                        onSelectUser(u);
-                        onShowToast(`Contexto cambiado a ${u.nombre_completo}`);
                         onClose();
                       }}
                       className={`p-3 rounded-xl border transition flex items-center justify-between cursor-pointer ${
