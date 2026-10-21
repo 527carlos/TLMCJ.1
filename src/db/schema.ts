@@ -13,6 +13,9 @@ export const users = pgTable('users', {
   requiereCambioPassword: boolean('requiere_cambio_password').default(false),
   permisos: jsonb('permisos').default({}),
   avatarUrl: text('avatar_url'),
+  verificationToken: text('verification_token'),
+  tokenExpiresAt: timestamp('token_expires_at'),
+  emailVerified: boolean('email_verified').default(true),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

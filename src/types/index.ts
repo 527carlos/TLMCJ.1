@@ -63,6 +63,9 @@ export interface Usuario {
   requiere_cambio_password?: boolean;
   codigo_recuperacion?: string | null;
   codigo_recuperacion_expira?: string | null;
+  verification_token?: string | null;
+  token_expires_at?: string | null;
+  email_verified?: boolean;
   ultimo_cambio_password?: string;
 }
 

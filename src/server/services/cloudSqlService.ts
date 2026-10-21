@@ -172,9 +172,63 @@ export class CloudSqlService {
       ALTER TABLE movimientos_banco ADD COLUMN IF NOT EXISTS saldo NUMERIC DEFAULT 0;
       ALTER TABLE movimientos_banco ADD COLUMN IF NOT EXISTS referencia TEXT;
       ALTER TABLE movimientos_libro ADD COLUMN IF NOT EXISTS tercero TEXT;
+      ALTER TABLE modificaciones_repositorio ALTER COLUMN detalles TYPE text USING detalles::text;
+
+      -- Migración y sincronización de tabla users
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255);
+      ALTER TABLE users ALTER COLUMN correo_corporativo DROP NOT NULL;
+      ALTER TABLE users ALTER COLUMN usuario DROP NOT NULL;
+
+      UPDATE users SET email = correo_corporativo WHERE email IS NULL OR email = '';
+      UPDATE users SET nombre_completo = usuario WHERE (nombre_completo IS NULL OR nombre_completo = '') AND usuario IS NOT NULL;
+      UPDATE users SET usuario = nombre_completo WHERE (usuario IS NULL OR usuario = '') AND nombre_completo IS NOT NULL;
+      UPDATE users SET correo_corporativo = email WHERE (correo_corporativo IS NULL OR correo_corporativo = '') AND email IS NOT NULL;
+
+      UPDATE empresas SET id = id_empresa WHERE id IS NULL OR id != id_empresa;
+      UPDATE facturas SET id = id_factura WHERE id IS NULL OR id != id_factura;
+
+      -- Triggers para garantizar sincronización bidireccional de IDs y campos
+      CREATE OR REPLACE FUNCTION sync_factura_ids()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        IF NEW.id IS NOT NULL THEN
+          NEW.id_factura := NEW.id;
+        ELSIF NEW.id_factura IS NOT NULL THEN
+          NEW.id := NEW.id_factura;
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS trg_sync_factura_ids ON facturas;
+      CREATE TRIGGER trg_sync_factura_ids
+      BEFORE INSERT OR UPDATE ON facturas
+      FOR EACH ROW EXECUTE FUNCTION sync_factura_ids();
+
+      CREATE OR REPLACE FUNCTION sync_empresa_ids()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        IF NEW.id IS NOT NULL THEN
+          NEW.id_empresa := NEW.id;
+        ELSIF NEW.id_empresa IS NOT NULL THEN
+          NEW.id := NEW.id_empresa;
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS trg_sync_empresa_ids ON empresas;
+      CREATE TRIGGER trg_sync_empresa_ids
+      BEFORE INSERT OR UPDATE ON empresas
+      FOR EACH ROW EXECUTE FUNCTION sync_empresa_ids();
+
+      SELECT setval('users_id_seq', (SELECT GREATEST(COALESCE(max(id), 0), 20) FROM users));
+      SELECT setval('empresas_id_seq', (SELECT GREATEST(COALESCE(max(id), 0), COALESCE(max(id_empresa), 0), 10) FROM empresas));
+      SELECT setval('facturas_id_seq', (SELECT GREATEST(COALESCE(max(id), 0), COALESCE(max(id_factura), 0), 100) FROM facturas));
+      SELECT setval('facturas_id_factura_seq', (SELECT GREATEST(COALESCE(max(id), 0), COALESCE(max(id_factura), 0), 100) FROM facturas));
     `;
     await pool.query(ddl);
-    console.log('[Database] DDL asegurado: Las 8 tablas relacionales existen y sus columnas están alineadas.');
+    console.log('[Database] DDL asegurado: Las 8 tablas relacionales existen y sus columnas y secuencias están alineadas.');
   }
 
   // Si la base de datos conectada (ej. Supabase para pruebas) está vacía, sembrar catálogo inicial
@@ -466,18 +520,26 @@ export class CloudSqlService {
   public static async getUsuarios(): Promise<Usuario[]> {
     try {
       const rows = await drizzleDb.select().from(schema.users).orderBy(schema.users.id);
-      return rows.map(r => ({
-        id_usuario: r.id,
-        nombre_completo: r.nombreCompleto,
-        email: r.email,
-        hashed_password: r.hashedPassword || undefined,
-        rol: r.rol as any,
-        activo: r.activo,
-        empresas_ids: r.empresasIds || [1],
-        permisos: (r.permisos as PermisosUsuario) || getDefaultPermissions(r.rol as any),
-        avatar_url: r.avatarUrl,
-        requiere_cambio_password: r.requiereCambioPassword || false
-      }));
+      const seen = new Set<number>();
+      const result: Usuario[] = [];
+      for (const r of rows) {
+        if (!seen.has(r.id)) {
+          seen.add(r.id);
+          result.push({
+            id_usuario: r.id,
+            nombre_completo: r.nombreCompleto,
+            email: r.email,
+            hashed_password: r.hashedPassword || undefined,
+            rol: r.rol as any,
+            activo: r.activo,
+            empresas_ids: r.empresasIds || [1],
+            permisos: (r.permisos as PermisosUsuario) || getDefaultPermissions(r.rol as any),
+            avatar_url: r.avatarUrl,
+            requiere_cambio_password: r.requiereCambioPassword || false
+          });
+        }
+      }
+      return result;
     } catch (error) {
       console.error('[CloudSQL] Error getUsuarios:', error);
       return [];
@@ -870,8 +932,8 @@ export class CloudSqlService {
 
   public static async deleteFactura(id: number): Promise<boolean> {
     try {
-      const deleted = await drizzleDb.delete(schema.facturas).where(eq(schema.facturas.id, id)).returning();
-      return deleted.length > 0;
+      const res = await pool.query('DELETE FROM facturas WHERE id = $1 OR id_factura = $1 RETURNING id', [id]);
+      return (res.rowCount || 0) > 0;
     } catch (error) {
       console.error('[CloudSQL] Error deleteFactura:', error);
       throw error;
@@ -880,8 +942,9 @@ export class CloudSqlService {
 
   public static async bulkDeleteFacturas(ids: number[]): Promise<number> {
     try {
-      const deleted = await drizzleDb.delete(schema.facturas).where(inArray(schema.facturas.id, ids)).returning();
-      return deleted.length;
+      if (!ids || ids.length === 0) return 0;
+      const res = await pool.query('DELETE FROM facturas WHERE id = ANY($1::int[]) OR id_factura = ANY($1::int[]) RETURNING id', [ids]);
+      return res.rowCount || 0;
     } catch (error) {
       console.error('[CloudSQL] Error bulkDeleteFacturas:', error);
       throw error;

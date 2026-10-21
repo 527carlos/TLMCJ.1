@@ -1037,12 +1037,12 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
                     if (userRoleFilter === 'TODOS') return true;
                     if (userRoleFilter === 'PENDIENTES') return !u.activo;
                     return u.rol === userRoleFilter;
-                  }).map(u => {
+                  }).map((u, uIdx) => {
                     const isUserAdmin = u.rol === 'Administrador' || u.permisos?.administrador;
                     const isMaster = u.id_usuario === 1;
 
                     return (
-                      <tr key={u.id_usuario} className="hover:bg-slate-50/80 transition">
+                      <tr key={`user-row-${u.id_usuario}-${u.email || uIdx}`} className="hover:bg-slate-50/80 transition">
                         {/* Name & Avatar */}
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-2.5">
@@ -1165,10 +1165,10 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
                         {/* Companies assigned */}
                         <td className="py-3 px-3">
                           <div className="flex flex-wrap gap-1 max-w-[140px]">
-                            {u.empresas_ids.map(eid => {
+                            {(Array.isArray(u.empresas_ids) ? [...new Set(u.empresas_ids)] : [1]).map((eid, eIdx) => {
                               const emp = empresas.find(e => e.id_empresa === eid);
                               return (
-                                <span key={eid} className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-semibold truncate max-w-[120px]">
+                                <span key={`emp-badge-${u.id_usuario}-${eid}-${eIdx}`} className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-semibold truncate max-w-[120px]">
                                   {emp?.nombre_comercial.split(' ')[0] || `Empresa ${eid}`}
                                 </span>
                               );
