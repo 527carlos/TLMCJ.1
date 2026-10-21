@@ -137,8 +137,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 }}
                 className="w-full bg-[#271a82]/60 border border-indigo-700/60 rounded-xl px-2.5 py-2 text-xs text-white font-medium focus:outline-none focus:border-[#e64519] transition appearance-none cursor-pointer"
               >
-                {empresas.map((emp, empIdx) => (
-                  <option key={`sidebar-emp-${emp.id_empresa}-${emp.nit || empIdx}`} value={emp.id_empresa} className="bg-[#1c1343] text-white">
+                {empresas.map((emp) => (
+                  <option key={emp.id_empresa} value={emp.id_empresa} className="bg-[#1c1343] text-white">
                     {emp.nombre_comercial} (NIT: {emp.nit})
                   </option>
                 ))}

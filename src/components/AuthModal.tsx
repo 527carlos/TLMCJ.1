@@ -1088,13 +1088,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </p>
 
               <div className="space-y-2">
-                {usuarios.map((u, uIdx) => {
+                {usuarios.map((u) => {
                   const isCurrent = currentUser?.id_usuario === u.id_usuario;
                   const hasPendingForcedChange = u.requiere_cambio_password === true;
 
                   return (
                     <div
-                      key={`switch-user-${u.id_usuario}-${u.email || uIdx}`}
+                      key={u.id_usuario}
                       onClick={() => {
                         if (!u.activo) {
                           onShowToast(`Usuario pendiente de aprobación por el Administrador Maestro`, 'error');

@@ -275,10 +275,10 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredFacturas.map((f, fIdx) => {
+                filteredFacturas.map(f => {
                   const isSelected = selectedIds.includes(f.id_factura);
                   return (
-                    <tr key={`factura-row-${f.id_factura}-${f.factura_num || fIdx}`} className={`hover:bg-slate-50/70 transition ${isSelected ? 'bg-indigo-50/30' : ''}`}>
+                    <tr key={f.id_factura} className={`hover:bg-slate-50/70 transition ${isSelected ? 'bg-indigo-50/30' : ''}`}>
                       <td className="py-3 px-3 text-center">
                         <button onClick={() => toggleSelectOne(f.id_factura)} className="cursor-pointer">
                           {isSelected ? (

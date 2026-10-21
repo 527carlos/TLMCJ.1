@@ -143,22 +143,16 @@ export default function App() {
       // 1. Fetch Empresas
       const resEmpresas = await fetch('/api/v1/empresas');
       const dataEmpresas = await resEmpresas.json();
-      const uniqueEmpresas = (Array.isArray(dataEmpresas) ? dataEmpresas : []).filter(
-        (e: Empresa, index: number, self: Empresa[]) => index === self.findIndex((t) => t.id_empresa === e.id_empresa)
-      );
-      setEmpresas(uniqueEmpresas);
-      if (uniqueEmpresas.length > 0 && !activeEmpresa) {
-        setActiveEmpresa(uniqueEmpresas[0]);
+      setEmpresas(dataEmpresas);
+      if (dataEmpresas.length > 0 && !activeEmpresa) {
+        setActiveEmpresa(dataEmpresas[0]);
       }
 
       // 2. Fetch Facturas
       const empId = activeEmpresa ? activeEmpresa.id_empresa : 1;
       const resFacturas = await fetch(`/api/v1/facturas?id_empresa=${empId}`);
       const dataFacturas = await resFacturas.json();
-      const uniqueFacturas = (Array.isArray(dataFacturas) ? dataFacturas : []).filter(
-        (f: Factura, index: number, self: Factura[]) => index === self.findIndex((t) => t.id_factura === f.id_factura)
-      );
-      setFacturas(uniqueFacturas);
+      setFacturas(dataFacturas);
 
       // 3. Fetch KPIs
       const resKpis = await fetch(`/api/v1/facturas/kpis/resumen?id_empresa=${empId}`);
@@ -168,11 +162,11 @@ export default function App() {
       // 4. Fetch Cuentas PUC & Balance
       const resPuc = await fetch(`/api/v1/contabilidad/puc?id_empresa=${empId}`);
       const dataPuc = await resPuc.json();
-      setCuentasPUC(Array.isArray(dataPuc) ? dataPuc : []);
+      setCuentasPUC(dataPuc);
 
       const resBalance = await fetch(`/api/v1/contabilidad/balance?id_empresa=${empId}`);
       const dataBalance = await resBalance.json();
-      setBalanceTerceros(Array.isArray(dataBalance) ? dataBalance : []);
+      setBalanceTerceros(dataBalance);
 
       // 5. Fetch F350 Report
       const resF350 = await fetch(`/api/v1/impuestos/f350?id_empresa=${empId}`);
@@ -182,14 +176,11 @@ export default function App() {
       // 6. Fetch Usuarios
       const resUsuarios = await fetch('/api/v1/auth/usuarios');
       const dataUsuarios = await resUsuarios.json();
-      const uniqueUsuarios = (Array.isArray(dataUsuarios) ? dataUsuarios : []).filter(
-        (u: Usuario, index: number, self: Usuario[]) => index === self.findIndex((t) => t.id_usuario === u.id_usuario)
-      );
-      setUsuarios(uniqueUsuarios);
-      if (uniqueUsuarios.length > 0) {
+      setUsuarios(dataUsuarios);
+      if (dataUsuarios.length > 0) {
         const savedId = localStorage.getItem('tlm_current_user_id');
         const activeId = savedId ? Number(savedId) : (currentUser?.id_usuario || 1);
-        const match = uniqueUsuarios.find((u: Usuario) => u.id_usuario === activeId) || uniqueUsuarios[0];
+        const match = dataUsuarios.find((u: Usuario) => u.id_usuario === activeId) || dataUsuarios[0];
         setCurrentUser(match);
         localStorage.setItem('tlm_current_user_id', match.id_usuario.toString());
         localStorage.setItem('tlm_current_user', JSON.stringify(match));
@@ -313,33 +304,27 @@ export default function App() {
   };
 
   const handleDeleteFactura = async (id: number) => {
-    if (!confirm('¿Desea eliminar este comprobante contable?')) return;
+    if (!confirm('Desea eliminar este comprobante contable?')) return;
     try {
-      setFacturas(prev => prev.filter(f => f.id_factura !== id));
-      const res = await fetch(`/api/v1/facturas/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Error al eliminar');
+      await fetch(`/api/v1/facturas/${id}`, { method: 'DELETE' });
       showToast('Factura eliminada.');
-      await loadData();
+      loadData();
     } catch (err) {
-      showToast('Error al eliminar factura.', 'error');
-      await loadData();
+      showToast('Error al eliminar.', 'error');
     }
   };
 
   const handleBulkDelete = async (ids: number[]) => {
     try {
-      setFacturas(prev => prev.filter(f => !ids.includes(f.id_factura)));
-      const res = await fetch('/api/v1/facturas/bulk-delete', {
+      await fetch('/api/v1/facturas/bulk-delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids })
       });
-      if (!res.ok) throw new Error('Error en borrado');
       showToast(`${ids.length} facturas eliminadas.`);
-      await loadData();
+      loadData();
     } catch (err) {
       showToast('Error en borrado masivo.', 'error');
-      await loadData();
     }
   };
 
@@ -349,7 +334,7 @@ export default function App() {
       const res = await fetch('/api/v1/conciliacion/ejecutar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tolerance })
+        body: JSON.stringify({ tolerancia: tolerance })
       });
       const data = await res.json();
       setConciliacionSummary(data);
@@ -373,28 +358,24 @@ export default function App() {
 
   const handleApproveUser = async (id: number) => {
     try {
-      setUsuarios(prev => prev.map(u => u.id_usuario === id ? { ...u, activo: true } : u));
       await fetch(`/api/v1/auth/usuarios/${id}/aprobar`, { method: 'PATCH' });
       showToast('Usuario aprobado y activado en la plataforma.');
-      await loadData();
+      loadData();
     } catch (err) {
       showToast('Error aprobando usuario.', 'error');
-      await loadData();
     }
   };
 
   const handleDeleteUser = async (id: number) => {
-    if (!confirm('¿Eliminar este usuario de la plataforma?')) return;
+    if (!confirm('Eliminar este usuario de la plataforma?')) return;
     try {
-      setUsuarios(prev => prev.filter(u => u.id_usuario !== id));
       const res = await fetch(`/api/v1/auth/usuarios/${id}`, { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Error eliminando usuario');
       showToast(data.mensaje || 'Usuario eliminado.');
-      await loadData();
+      loadData();
     } catch (err: any) {
       showToast(err.message || 'Error eliminando usuario.', 'error');
-      await loadData();
     }
   };
 
@@ -404,30 +385,26 @@ export default function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Error modificando permisos de administrador');
       showToast(data.mensaje || 'Estado de administrador actualizado.');
-      await loadData();
+      loadData();
     } catch (err: any) {
       showToast(err.message || 'Error modificando estado de administrador.', 'error');
-      await loadData();
     }
   };
 
   const handleToggleActivo = async (id: number) => {
     try {
-      setUsuarios(prev => prev.map(u => u.id_usuario === id ? { ...u, activo: !u.activo } : u));
       const res = await fetch(`/api/v1/auth/usuarios/${id}/toggle-activo`, { method: 'PATCH' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Error al cambiar estado de acceso');
       showToast(data.mensaje || 'Estado de acceso actualizado.');
-      await loadData();
+      loadData();
     } catch (err: any) {
       showToast(err.message || 'Error al cambiar estado de acceso.', 'error');
-      await loadData();
     }
   };
 
   const handleChangeRole = async (id: number, rol: 'Administrador' | 'Contador' | 'Analista' | 'Auditor') => {
     try {
-      setUsuarios(prev => prev.map(u => u.id_usuario === id ? { ...u, rol } : u));
       const res = await fetch(`/api/v1/auth/usuarios/${id}/rol`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -436,10 +413,9 @@ export default function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Error cambiando rol');
       showToast(data.mensaje || `Rol cambiado a ${rol}.`);
-      await loadData();
+      loadData();
     } catch (err: any) {
       showToast(err.message || 'Error cambiando rol.', 'error');
-      await loadData();
     }
   };
 
