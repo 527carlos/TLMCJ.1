@@ -1473,13 +1473,44 @@ router.post('/facturas/upload', upload.array('archivos'), async (req: Request, r
     }
   }
 
-  // Guardar en línea directamente en Google Cloud SQL
   let processedFacturas: Factura[] = [];
   try {
     processedFacturas = await CloudSqlService.bulkCreateFacturas(parsedFacturas);
-    processedFacturas.forEach(f => db.facturas.push(f));
   } catch (e) {
-    console.error('[CloudSQL] Error guardando facturas subidas en Cloud SQL:', e);
+    console.warn('[CloudSQL] Neon no disponible al guardar facturas subidas:', e);
+  }
+
+  if (processedFacturas.length === 0 && parsedFacturas.length > 0) {
+    processedFacturas = parsedFacturas.map((factura, index) => ({
+      ...factura,
+      id_factura: Date.now() + index,
+      id_empresa: factura.id_empresa || idEmpresa,
+      factura_num: factura.factura_num || `XML-${Date.now()}-${index}`,
+      fecha: factura.fecha || new Date().toISOString().split('T')[0],
+      proveedor: factura.proveedor || 'Proveedor no identificado',
+      nit_tercero: factura.nit_tercero || 'N/A',
+      descripcion_item: factura.descripcion_item || 'Factura electrónica UBL',
+      cantidad: factura.cantidad || 1,
+      valor_unitario: factura.valor_unitario || factura.subtotal || 0,
+      subtotal: factura.subtotal || 0,
+      iva: factura.iva || 0,
+      total: factura.total || (factura.subtotal || 0) + (factura.iva || 0),
+      retencion_porc: factura.retencion_porc || 0,
+      retencion_valor: factura.retencion_valor || 0,
+      casilla_350: factura.casilla_350 || 83,
+      forma_pago: factura.forma_pago || 'Crédito',
+      medio_pago: factura.medio_pago || 'Transferencia Débito',
+      cuenta_gasto: factura.cuenta_gasto || '513535',
+      tipo_comprobante: factura.tipo_comprobante || 'Factura Electrónica',
+      cufe_hash: factura.cufe_hash || `cufe-local-${Date.now()}-${index}`,
+      estado_revision: factura.estado_revision || 'PENDIENTE',
+      fecha_cargue: factura.fecha_cargue || new Date().toISOString()
+    } as Factura));
+  }
+
+  if (processedFacturas.length > 0) {
+    db.facturas.push(...processedFacturas);
+    db.saveToDisk();
   }
 
   res.json({
@@ -1565,18 +1596,24 @@ router.delete('/facturas/:id', async (req: Request, res: Response) => {
   }
 
   try {
-    const deleted = await CloudSqlService.deleteFactura(id);
+    let deletedInCloud = false;
+    try {
+      deletedInCloud = await CloudSqlService.deleteFactura(id);
+    } catch (err) {
+      console.warn('[CloudSQL] Neon no disponible al eliminar factura; se actualizará la copia local:', err);
+    }
+
     const idx = db.facturas.findIndex(f => f.id_factura === id);
     if (idx !== -1) {
       db.facturas.splice(idx, 1);
       db.saveToDisk();
     }
-    if (!deleted && idx === -1) {
+    if (!deletedInCloud && idx === -1) {
       return res.status(404).json({ detail: 'Factura no encontrada.' });
     }
-    res.json({ mensaje: 'Factura eliminada correctamente.' });
+    res.json({ mensaje: 'Factura eliminada correctamente.', sincronizada_en_neon: deletedInCloud });
   } catch (err: any) {
-    res.status(500).json({ detail: 'Error eliminando factura de Cloud SQL: ' + err.message });
+    res.status(500).json({ detail: 'Error eliminando factura: ' + err.message });
   }
 });
 
@@ -1587,14 +1624,26 @@ router.post('/facturas/bulk-delete', async (req: Request, res: Response) => {
     : [];
 
   try {
-    const deletedCount = await CloudSqlService.bulkDeleteFacturas(ids);
+    let deletedCount = 0;
+    try {
+      deletedCount = await CloudSqlService.bulkDeleteFacturas(ids);
+    } catch (err) {
+      console.warn('[CloudSQL] Neon no disponible al eliminar facturas; se actualizará la copia local:', err);
+    }
+
     const previousLength = db.facturas.length;
     db.facturas = db.facturas.filter(f => !ids.includes(f.id_factura));
-    if (db.facturas.length !== previousLength) db.saveToDisk();
-    const restantes = (await CloudSqlService.getFacturas()).length;
-    res.json({ mensaje: `Se eliminaron ${deletedCount} facturas correctamente.`, restantes });
+    const localDeletedCount = previousLength - db.facturas.length;
+    if (localDeletedCount > 0) db.saveToDisk();
+    const restantesCloud = await CloudSqlService.getFacturas().catch(() => []);
+    const restantes = restantesCloud.length > 0 ? restantesCloud.length : db.facturas.length;
+    res.json({
+      mensaje: `Se eliminaron ${Math.max(deletedCount, localDeletedCount)} facturas correctamente.`,
+      restantes,
+      sincronizada_en_neon: deletedCount > 0
+    });
   } catch (err: any) {
-    res.status(500).json({ detail: 'Error en bulk delete de Cloud SQL: ' + err.message });
+    res.status(500).json({ detail: 'Error en bulk delete de facturas: ' + err.message });
   }
 });
 
