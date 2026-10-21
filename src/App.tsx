@@ -18,24 +18,8 @@ import { CufeModal } from './components/CufeModal.tsx';
 import { SiigoPushModal } from './components/SiigoPushModal.tsx';
 import { BrandCustomizerModal } from './components/BrandCustomizerModal.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
+import { TlmLogo } from './components/TlmLogo.tsx';
 import { Empresa, Usuario, PermisosUsuario, Factura, CuentaPUC, BalanceTercero, F350Report, ConciliacionSummary } from './types/index.ts';
-
-const defaultAdminUser: Usuario = {
-  id_usuario: 1,
-  nombre_completo: "Juan Yaya - Administrador Maestro",
-  email: "automatizaciones@tlm.net.co",
-  rol: "Administrador",
-  activo: true,
-  empresas_ids: [1, 2, 3],
-  permisos: {
-    administrador: true,
-    auditoria_ubl: true,
-    impuestos_f350: true,
-    conciliacion_bancaria: true,
-    transmitir_siigo: true,
-    gestion_usuarios: true
-  }
-};
 
 export default function App() {
   const [currentSection, setCurrentSection] = useState<string>('dashboard');
@@ -53,9 +37,20 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<Usuario | null>(() => {
     try {
       const savedUser = localStorage.getItem('tlm_current_user');
-      if (savedUser) return JSON.parse(savedUser);
+      const savedTimestamp = localStorage.getItem('tlm_session_timestamp');
+      const SESSION_DURATION_MS = 8 * 60 * 60 * 1000; // 8 horas
+      if (savedUser && savedTimestamp) {
+        const elapsed = Date.now() - Number(savedTimestamp);
+        if (elapsed < SESSION_DURATION_MS) {
+          return JSON.parse(savedUser);
+        } else {
+          localStorage.removeItem('tlm_current_user');
+          localStorage.removeItem('tlm_current_user_id');
+          localStorage.removeItem('tlm_session_timestamp');
+        }
+      }
     } catch (e) {}
-    return defaultAdminUser;
+    return null;
   });
 
   const handleSelectUser = (u: Usuario | null) => {
@@ -63,9 +58,11 @@ export default function App() {
     if (u) {
       localStorage.setItem('tlm_current_user_id', u.id_usuario.toString());
       localStorage.setItem('tlm_current_user', JSON.stringify(u));
+      localStorage.setItem('tlm_session_timestamp', Date.now().toString());
     } else {
       localStorage.removeItem('tlm_current_user_id');
       localStorage.removeItem('tlm_current_user');
+      localStorage.removeItem('tlm_session_timestamp');
     }
   };
 
@@ -230,9 +227,26 @@ export default function App() {
     }
   };
 
+  const loadUsuariosOnly = async () => {
+    try {
+      const resUsuarios = await fetch('/api/v1/auth/usuarios');
+      const dataUsuarios = await resUsuarios.json();
+      const uniqueUsuarios = (Array.isArray(dataUsuarios) ? dataUsuarios : []).filter(
+        (u: Usuario, index: number, self: Usuario[]) => index === self.findIndex((t) => t.id_usuario === u.id_usuario)
+      );
+      setUsuarios(uniqueUsuarios);
+    } catch (err) {
+      console.error("Error cargando usuarios para login:", err);
+    }
+  };
+
   useEffect(() => {
-    loadData();
-  }, [activeEmpresa?.id_empresa]);
+    if (currentUser) {
+      loadData();
+    } else {
+      loadUsuariosOnly();
+    }
+  }, [activeEmpresa?.id_empresa, currentUser?.id_usuario]);
 
   // Actions
   const handleUploadXml = async (files: FileList) => {
@@ -510,6 +524,43 @@ export default function App() {
   };
 
   const pendingInvoices = facturas.filter(f => f.estado_revision === 'PENDIENTE').length;
+
+  if (!currentUser) {
+    return (
+      <div className="fixed inset-0 z-50 bg-gradient-to-br from-[#0f0a2e] via-[#1c1343] to-[#271a82] flex items-center justify-center p-4">
+        {toast && (
+          <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-2xl shadow-xl text-xs font-bold text-white flex items-center gap-2 animate-in slide-in-from-top duration-200 ${
+            toast.type === 'error' ? 'bg-red-600' : 'bg-emerald-600'
+          }`}>
+            <span>{toast.message}</span>
+          </div>
+        )}
+
+        <div className="w-full max-w-md">
+          <div className="text-center mb-6 animate-in fade-in slide-in-from-bottom duration-500">
+            <div className="inline-flex items-center justify-center mb-4">
+              <TlmLogo variant="full" theme="dark" size="lg" />
+            </div>
+            <h1 className="text-white font-black text-2xl tracking-tight">Consola TLM</h1>
+            <p className="text-indigo-200/80 text-sm mt-1">Contabilidad Inteligente · Sociedad BIC</p>
+          </div>
+
+          <AuthModal
+            isOpen={true}
+            onClose={() => {}}
+            currentUser={null}
+            usuarios={usuarios.length > 0 ? usuarios : (currentUser ? [] : [])}
+            onSelectUser={handleSelectUser}
+            onLogout={() => handleSelectUser(null)}
+            onShowToast={showToast}
+            onRefreshUsers={loadData}
+            onUpdateAvatar={handleUpdateAvatar}
+            initialTab="login"
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-[#F8F9FA] text-slate-900 font-sans antialiased overflow-hidden">
