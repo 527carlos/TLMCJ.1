@@ -394,10 +394,13 @@ router.post('/auth/register', (req: Request, res: Response) => {
 router.get('/auth/usuarios', async (_req: Request, res: Response) => {
   try {
     const usuarios = await CloudSqlService.getUsuarios();
-    res.json(usuarios);
+    if (usuarios.length > 0) {
+      return res.json(usuarios);
+    }
   } catch (err) {
-    res.json(db.usuarios);
+    console.warn('[CloudSQL] Fallback usuarios a DataStore local:', err);
   }
+  res.json(db.usuarios);
 });
 
 router.patch('/auth/usuarios/:id/aprobar', async (req: Request, res: Response) => {
@@ -1402,18 +1405,29 @@ router.get('/facturas', async (req: Request, res: Response) => {
     const casilla = req.query.casilla ? parseInt(req.query.casilla as string) : undefined;
 
     const items = await CloudSqlService.getFacturas({ idEmpresa, estado, search, casilla });
-    res.json(items);
+    if (items.length > 0) {
+      return res.json(items);
+    }
   } catch (err: any) {
-    console.warn('[CloudSQL] Fallback facturas:', err);
-    let items = db.facturas;
-    if (req.query.id_empresa) {
-      items = items.filter(f => f.id_empresa === parseInt(req.query.id_empresa as string));
-    }
-    if (req.query.estado && req.query.estado !== 'TODOS') {
-      items = items.filter(f => f.estado_revision === req.query.estado);
-    }
-    res.json(items);
+    console.warn('[CloudSQL] Fallback facturas a DataStore local:', err);
   }
+  let items = [...db.facturas];
+  if (req.query.id_empresa) {
+    items = items.filter(f => f.id_empresa === parseInt(req.query.id_empresa as string));
+  }
+  if (req.query.estado && req.query.estado !== 'TODOS') {
+    items = items.filter(f => f.estado_revision === req.query.estado);
+  }
+  if (req.query.search) {
+    const s = (req.query.search as string).toLowerCase();
+    items = items.filter(f =>
+      f.factura_num.toLowerCase().includes(s) ||
+      f.proveedor.toLowerCase().includes(s) ||
+      f.nit_tercero.includes(s) ||
+      f.descripcion_item.toLowerCase().includes(s)
+    );
+  }
+  res.json(items);
 });
 
 router.post('/facturas/upload', upload.array('archivos'), async (req: Request, res: Response) => {

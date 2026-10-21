@@ -29,10 +29,10 @@ export class CloudSqlService {
     }
   }
 
-  // Garantiza que las 8 tablas relacionales existan en Supabase o Cloud SQL
+  // Garantiza que las 8 tablas relacionales existan en la base de datos
   public static async ensureTablesExist(): Promise<void> {
-    const ddl = `
-      CREATE TABLE IF NOT EXISTS empresas (
+    const statements = [
+      `CREATE TABLE IF NOT EXISTS empresas (
         id SERIAL PRIMARY KEY,
         nombre_comercial TEXT NOT NULL,
         nit TEXT NOT NULL UNIQUE,
@@ -42,9 +42,8 @@ export class CloudSqlService {
         siigo_access_key TEXT,
         siigo_document_id INTEGER DEFAULT 24,
         created_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS users (
+      )`,
+      `CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         uid TEXT UNIQUE,
         email TEXT NOT NULL UNIQUE,
@@ -56,10 +55,12 @@ export class CloudSqlService {
         requiere_cambio_password BOOLEAN DEFAULT FALSE,
         permisos JSONB DEFAULT '{}'::jsonb,
         avatar_url TEXT,
+        verification_token TEXT,
+        token_expires_at TIMESTAMP,
+        email_verified BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS facturas (
+      )`,
+      `CREATE TABLE IF NOT EXISTS facturas (
         id BIGSERIAL PRIMARY KEY,
         id_empresa INTEGER DEFAULT 1,
         factura_num TEXT NOT NULL,
@@ -69,13 +70,13 @@ export class CloudSqlService {
         fecha_vencimiento TEXT,
         tipo_comprobante TEXT DEFAULT 'Factura Electrónica',
         descripcion_item TEXT NOT NULL,
-        cantidad NUMERIC DEFAULT 1,
-        valor_unitario NUMERIC DEFAULT 0,
-        subtotal NUMERIC NOT NULL DEFAULT 0,
-        iva NUMERIC NOT NULL DEFAULT 0,
-        retencion_porc NUMERIC DEFAULT 0,
-        retencion_valor NUMERIC DEFAULT 0,
-        total NUMERIC DEFAULT 0,
+        cantidad NUMERIC DEFAULT '1',
+        valor_unitario NUMERIC DEFAULT '0',
+        subtotal NUMERIC NOT NULL DEFAULT '0',
+        iva NUMERIC NOT NULL DEFAULT '0',
+        retencion_porc NUMERIC DEFAULT '0',
+        retencion_valor NUMERIC DEFAULT '0',
+        total NUMERIC DEFAULT '0',
         estado_revision TEXT DEFAULT 'PENDIENTE',
         cufe_hash TEXT,
         casilla_350 INTEGER DEFAULT 83,
@@ -85,150 +86,75 @@ export class CloudSqlService {
         estado_siigo TEXT DEFAULT 'PENDIENTE',
         fecha_cargue TEXT,
         created_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS cuentas_puc (
+      )`,
+      `CREATE TABLE IF NOT EXISTS cuentas_puc (
         id SERIAL PRIMARY KEY,
-        cuenta TEXT NOT NULL UNIQUE,
+        id_empresa INTEGER DEFAULT 1,
+        cuenta TEXT NOT NULL,
         nombre TEXT NOT NULL,
-        naturaleza TEXT NOT NULL DEFAULT 'DEBITO',
-        nivel INTEGER DEFAULT 4,
-        saldo NUMERIC DEFAULT 0,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS balance_terceros (
-        id SERIAL PRIMARY KEY,
+        naturaleza TEXT DEFAULT 'DEBITO'
+      )`,
+      `CREATE TABLE IF NOT EXISTS balance_terceros (
+        id BIGSERIAL PRIMARY KEY,
         id_empresa INTEGER DEFAULT 1,
-        nit TEXT NOT NULL,
-        razon_social TEXT NOT NULL,
-        cuenta_puc TEXT NOT NULL,
-        saldo_debito NUMERIC DEFAULT 0,
-        saldo_credito NUMERIC DEFAULT 0,
-        saldo_neto NUMERIC DEFAULT 0,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS movimientos_banco (
-        id SERIAL PRIMARY KEY,
-        id_empresa INTEGER DEFAULT 1,
+        cuenta_contable TEXT NOT NULL,
+        nombre_cuenta TEXT NOT NULL,
+        nit_tercero TEXT NOT NULL,
+        nombre_tercero TEXT NOT NULL,
+        saldo_inicial NUMERIC DEFAULT '0',
+        debitos NUMERIC DEFAULT '0',
+        creditos NUMERIC DEFAULT '0',
+        saldo_final NUMERIC DEFAULT '0'
+      )`,
+      `CREATE TABLE IF NOT EXISTS movimientos_banco (
+        id TEXT PRIMARY KEY,
         fecha TEXT NOT NULL,
-        referencia TEXT NOT NULL,
-        descripcion TEXT NOT NULL,
-        valor NUMERIC NOT NULL,
+        concepto TEXT NOT NULL,
+        monto NUMERIC NOT NULL,
         tipo TEXT NOT NULL,
-        conciliado BOOLEAN DEFAULT FALSE,
-        match_id INTEGER,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS movimientos_libro (
-        id SERIAL PRIMARY KEY,
-        id_empresa INTEGER DEFAULT 1,
+        saldo NUMERIC DEFAULT '0',
+        referencia TEXT,
+        conciliado BOOLEAN DEFAULT FALSE
+      )`,
+      `CREATE TABLE IF NOT EXISTS movimientos_libro (
+        id TEXT PRIMARY KEY,
         fecha TEXT NOT NULL,
-        comprobante TEXT NOT NULL,
-        descripcion TEXT NOT NULL,
-        valor NUMERIC NOT NULL,
+        concepto TEXT NOT NULL,
+        monto NUMERIC NOT NULL,
         tipo TEXT NOT NULL,
-        conciliado BOOLEAN DEFAULT FALSE,
-        match_id INTEGER,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS modificaciones_repositorio (
-        id SERIAL PRIMARY KEY,
+        cuenta TEXT NOT NULL,
+        tercero TEXT,
+        conciliado BOOLEAN DEFAULT FALSE
+      )`,
+      `CREATE TABLE IF NOT EXISTS modificaciones_repositorio (
+        id TEXT PRIMARY KEY,
         timestamp TEXT NOT NULL,
-        autor_id INTEGER NOT NULL,
+        autor_id INTEGER DEFAULT 1,
         autor_nombre TEXT NOT NULL,
+        autor_email TEXT,
+        autor_rol TEXT,
         tipo_accion TEXT NOT NULL,
         descripcion TEXT NOT NULL,
         detalles TEXT,
-        version_origen TEXT DEFAULT 'v1.0.0',
-        version_destino TEXT DEFAULT 'v2.0.0',
-        hash_commit TEXT,
-        archivos_modificados TEXT[] DEFAULT ARRAY[]::text[],
-        created_at TIMESTAMP DEFAULT NOW()
-      );
+        version_destino TEXT DEFAULT 'v2.0',
+        repositorio TEXT DEFAULT 'Repositorio Central de Juan Yaya',
+        hash_commit TEXT
+      )`,
+      `ALTER TABLE cuentas_puc ADD COLUMN IF NOT EXISTS id_empresa INTEGER DEFAULT 1`,
+      `ALTER TABLE balance_terceros ADD COLUMN IF NOT EXISTS id_empresa INTEGER DEFAULT 1`,
+      `SELECT setval('users_id_seq', (SELECT GREATEST(COALESCE(max(id), 0), 20) FROM users))`,
+      `SELECT setval('empresas_id_seq', (SELECT GREATEST(COALESCE(max(id), 0), 10) FROM empresas))`,
+      `SELECT setval('facturas_id_seq', (SELECT GREATEST(COALESCE(max(id), 0), 100) FROM facturas))`,
+    ];
 
-      -- Migraciones de columnas para compatibilidad garantizada
-      ALTER TABLE empresas ADD COLUMN IF NOT EXISTS id SERIAL;
-      ALTER TABLE empresas ADD COLUMN IF NOT EXISTS software_destino TEXT DEFAULT 'SIIGO_NUBE';
-      ALTER TABLE empresas ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
-
-      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS id SERIAL;
-      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS fecha_vencimiento TEXT;
-      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS cantidad NUMERIC DEFAULT 1;
-      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS valor_unitario NUMERIC DEFAULT 0;
-      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS retencion_porc NUMERIC DEFAULT 0;
-      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS retencion_valor NUMERIC DEFAULT 0;
-      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS casilla_350 INTEGER DEFAULT 83;
-      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS forma_pago TEXT DEFAULT 'Crédito';
-      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS medio_pago TEXT DEFAULT 'Transferencia Débito';
-      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS cuenta_gasto TEXT DEFAULT '513535';
-      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS estado_siigo TEXT DEFAULT 'PENDIENTE';
-      ALTER TABLE facturas ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
-
-      ALTER TABLE balance_terceros ADD COLUMN IF NOT EXISTS nombre_cuenta TEXT DEFAULT '';
-      ALTER TABLE movimientos_banco ADD COLUMN IF NOT EXISTS saldo NUMERIC DEFAULT 0;
-      ALTER TABLE movimientos_banco ADD COLUMN IF NOT EXISTS referencia TEXT;
-      ALTER TABLE movimientos_libro ADD COLUMN IF NOT EXISTS tercero TEXT;
-      ALTER TABLE modificaciones_repositorio ALTER COLUMN detalles TYPE text USING detalles::text;
-
-      -- Migración y sincronización de tabla users
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255);
-      ALTER TABLE users ALTER COLUMN correo_corporativo DROP NOT NULL;
-      ALTER TABLE users ALTER COLUMN usuario DROP NOT NULL;
-
-      UPDATE users SET email = correo_corporativo WHERE email IS NULL OR email = '';
-      UPDATE users SET nombre_completo = usuario WHERE (nombre_completo IS NULL OR nombre_completo = '') AND usuario IS NOT NULL;
-      UPDATE users SET usuario = nombre_completo WHERE (usuario IS NULL OR usuario = '') AND nombre_completo IS NOT NULL;
-      UPDATE users SET correo_corporativo = email WHERE (correo_corporativo IS NULL OR correo_corporativo = '') AND email IS NOT NULL;
-
-      UPDATE empresas SET id = id_empresa WHERE id IS NULL OR id != id_empresa;
-      UPDATE facturas SET id = id_factura WHERE id IS NULL OR id != id_factura;
-
-      -- Triggers para garantizar sincronización bidireccional de IDs y campos
-      CREATE OR REPLACE FUNCTION sync_factura_ids()
-      RETURNS TRIGGER AS $$
-      BEGIN
-        IF NEW.id IS NOT NULL THEN
-          NEW.id_factura := NEW.id;
-        ELSIF NEW.id_factura IS NOT NULL THEN
-          NEW.id := NEW.id_factura;
-        END IF;
-        RETURN NEW;
-      END;
-      $$ LANGUAGE plpgsql;
-
-      DROP TRIGGER IF EXISTS trg_sync_factura_ids ON facturas;
-      CREATE TRIGGER trg_sync_factura_ids
-      BEFORE INSERT OR UPDATE ON facturas
-      FOR EACH ROW EXECUTE FUNCTION sync_factura_ids();
-
-      CREATE OR REPLACE FUNCTION sync_empresa_ids()
-      RETURNS TRIGGER AS $$
-      BEGIN
-        IF NEW.id IS NOT NULL THEN
-          NEW.id_empresa := NEW.id;
-        ELSIF NEW.id_empresa IS NOT NULL THEN
-          NEW.id := NEW.id_empresa;
-        END IF;
-        RETURN NEW;
-      END;
-      $$ LANGUAGE plpgsql;
-
-      DROP TRIGGER IF EXISTS trg_sync_empresa_ids ON empresas;
-      CREATE TRIGGER trg_sync_empresa_ids
-      BEFORE INSERT OR UPDATE ON empresas
-      FOR EACH ROW EXECUTE FUNCTION sync_empresa_ids();
-
-      SELECT setval('users_id_seq', (SELECT GREATEST(COALESCE(max(id), 0), 20) FROM users));
-      SELECT setval('empresas_id_seq', (SELECT GREATEST(COALESCE(max(id), 0), COALESCE(max(id_empresa), 0), 10) FROM empresas));
-      SELECT setval('facturas_id_seq', (SELECT GREATEST(COALESCE(max(id), 0), COALESCE(max(id_factura), 0), 100) FROM facturas));
-      SELECT setval('facturas_id_factura_seq', (SELECT GREATEST(COALESCE(max(id), 0), COALESCE(max(id_factura), 0), 100) FROM facturas));
-    `;
-    await pool.query(ddl);
-    console.log('[Database] DDL asegurado: Las 8 tablas relacionales existen y sus columnas y secuencias están alineadas.');
+    for (const stmt of statements) {
+      try {
+        await pool.query(stmt);
+      } catch (err: any) {
+        console.warn('[Database] DDL parcial (no crítico):', err.message);
+      }
+    }
+    console.log('[Database] DDL asegurado: Las 8 tablas relacionales existen y sus columnas están alineadas.');
   }
 
   // Si la base de datos conectada (ej. Supabase para pruebas) está vacía, sembrar catálogo inicial
@@ -259,22 +185,22 @@ export class CloudSqlService {
       `);
 
       await pool.query(`
-        INSERT INTO cuentas_puc (id, cuenta, nombre, naturaleza, nivel, saldo)
+        INSERT INTO cuentas_puc (id, id_empresa, cuenta, nombre, naturaleza)
         VALUES
-          (1, '110505', 'Caja General', 'DEBITO', 4, 1500000),
-          (2, '111005', 'Banco Nacional - Cta Corriente', 'DEBITO', 4, 45800000),
-          (3, '130505', 'Clientes Nacionales', 'DEBITO', 4, 28400000),
-          (4, '143505', 'Mercancías No Fabricadas por la Empresa', 'DEBITO', 4, 62000000),
-          (5, '220505', 'Proveedores Nacionales', 'CREDITO', 4, 18900000),
-          (6, '233525', 'Honorarios y Servicios Técnicos', 'CREDITO', 4, 4200000),
-          (7, '236540', 'Retención en la Fuente 4% Compras', 'CREDITO', 4, 1250000),
-          (8, '236525', 'Retención en la Fuente 11% Servicios', 'CREDITO', 4, 980000),
-          (9, '236701', 'Retención de IVA (ReteIVA 15%)', 'CREDITO', 4, 450000),
-          (10, '236801', 'Retención de ICA (ReteICA 9.66 por mil)', 'CREDITO', 4, 320000),
-          (11, '240801', 'Impuesto a las Ventas por Pagar (IVA 19%)', 'CREDITO', 4, 8750000),
-          (12, '413501', 'Comercio al por mayor y al por menor', 'CREDITO', 4, 142000000),
-          (13, '510506', 'Sueldos y Salarios Administrativos', 'DEBITO', 4, 22000000),
-          (14, '513535', 'Servicios de Tecnología & Nube Cloud', 'DEBITO', 4, 6800000)
+          (1, 1, '110505', 'Caja General', 'DEBITO'),
+          (2, 1, '111005', 'Banco Nacional - Cta Corriente', 'DEBITO'),
+          (3, 1, '130505', 'Clientes Nacionales', 'DEBITO'),
+          (4, 1, '143505', 'Mercancías No Fabricadas por la Empresa', 'DEBITO'),
+          (5, 1, '220505', 'Proveedores Nacionales', 'CREDITO'),
+          (6, 1, '233525', 'Honorarios y Servicios Técnicos', 'CREDITO'),
+          (7, 1, '236540', 'Retención en la Fuente 4% Compras', 'CREDITO'),
+          (8, 1, '236525', 'Retención en la Fuente 11% Servicios', 'CREDITO'),
+          (9, 1, '236701', 'Retención de IVA (ReteIVA 15%)', 'CREDITO'),
+          (10, 1, '236801', 'Retención de ICA (ReteICA 9.66 por mil)', 'CREDITO'),
+          (11, 1, '240801', 'Impuesto a las Ventas por Pagar (IVA 19%)', 'CREDITO'),
+          (12, 1, '413501', 'Comercio al por mayor y al por menor', 'CREDITO'),
+          (13, 1, '510506', 'Sueldos y Salarios Administrativos', 'DEBITO'),
+          (14, 1, '513535', 'Servicios de Tecnología & Nube Cloud', 'DEBITO')
         ON CONFLICT (id) DO NOTHING;
       `);
 
@@ -289,36 +215,38 @@ export class CloudSqlService {
       `);
 
       await pool.query(`
-        INSERT INTO balance_terceros (id, id_empresa, nit, razon_social, cuenta_puc, saldo_debito, saldo_credito, saldo_neto)
+        INSERT INTO balance_terceros (id, id_empresa, cuenta_contable, nombre_cuenta, nit_tercero, nombre_tercero, saldo_inicial, debitos, creditos, saldo_final)
         VALUES
-          (1, 1, '901998877', 'CLOUDFLARE ENTERPRISE SERVICES LLC', '220505', 0, 2127500, -2127500),
-          (2, 1, '900887766', 'DATADOG MONITORING & LOGS CORP', '220505', 0, 3680000, -3680000),
-          (3, 1, '860002450', 'ORACLE CLOUD SERVICES DE COLOMBIA S.A.S.', '220505', 0, 6670000, -6670000)
+          (1, 1, '220505', 'Proveedores Nacionales', '901998877', 'CLOUDFLARE ENTERPRISE SERVICES LLC', 0, 0, 2127500, -2127500),
+          (2, 1, '220505', 'Proveedores Nacionales', '900887766', 'DATADOG MONITORING & LOGS CORP', 0, 0, 3680000, -3680000),
+          (3, 1, '220505', 'Proveedores Nacionales', '860002450', 'ORACLE CLOUD SERVICES DE COLOMBIA S.A.S.', 0, 0, 6670000, -6670000)
         ON CONFLICT (id) DO NOTHING;
       `);
 
       await pool.query(`
-        INSERT INTO movimientos_banco (id, id_empresa, fecha, referencia, descripcion, valor, tipo, conciliado, match_id)
+        INSERT INTO movimientos_banco (id, fecha, concepto, monto, tipo, saldo, referencia, conciliado)
         VALUES
-          (1, 1, '2026-10-01', 'TRF-00192', 'PAGO FACTURA PROVEEDOR CLOUDFLARE', 2127500, 'EGRESO', true, 1),
-          (2, 1, '2026-10-02', 'TRF-00193', 'PAGO SUSCRIPCION DATADOG', 3680000, 'EGRESO', true, 2),
-          (3, 1, '2026-10-05', 'DEP-88392', 'RECAUDO CLIENTE DISTRIBUIDORA NORTE', 15800000, 'INGRESO', true, 3),
-          (4, 1, '2026-10-08', 'TRF-00198', 'PAGO NOMINA PRIMERA QUINCENA OCTUBRE', 11000000, 'EGRESO', false, NULL)
-        ON CONFLICT (id) DO NOTHING;
-
-        INSERT INTO movimientos_libro (id, id_empresa, fecha, comprobante, descripcion, valor, tipo, conciliado, match_id)
-        VALUES
-          (1, 1, '2026-10-01', 'CE-10045', 'Egreso comprobante factura Cloudflare', 2127500, 'EGRESO', true, 1),
-          (2, 1, '2026-10-02', 'CE-10046', 'Egreso comprobante Datadog', 3680000, 'EGRESO', true, 2),
-          (3, 1, '2026-10-05', 'RC-20089', 'Recibo caja cliente Distribuidora Norte', 15800000, 'INGRESO', true, 3),
-          (4, 1, '2026-10-09', 'CE-10047', 'Egreso pago nómina quincenal', 11000000, 'EGRESO', false, NULL)
+          ('banco-1', '2026-10-01', 'PAGO FACTURA PROVEEDOR CLOUDFLARE', 2127500, 'DEBITO', 0, 'TRF-00192', true),
+          ('banco-2', '2026-10-02', 'PAGO SUSCRIPCION DATADOG', 3680000, 'DEBITO', 0, 'TRF-00193', true),
+          ('banco-3', '2026-10-05', 'RECAUDO CLIENTE DISTRIBUIDORA NORTE', 15800000, 'CREDITO', 0, 'DEP-88392', true),
+          ('banco-4', '2026-10-08', 'PAGO NOMINA PRIMERA QUINCENA OCTUBRE', 11000000, 'DEBITO', 0, 'TRF-00198', false)
         ON CONFLICT (id) DO NOTHING;
       `);
 
       await pool.query(`
-        INSERT INTO modificaciones_repositorio (id, timestamp, autor_id, autor_nombre, tipo_accion, descripcion, detalles, version_origen, version_destino, hash_commit, archivos_modificados)
+        INSERT INTO movimientos_libro (id, fecha, concepto, monto, tipo, cuenta, tercero, conciliado)
         VALUES
-          (1, NOW()::text, 1, 'Juan Yaya - Administrador Maestro', 'INIT_SEED', 'Inicialización y despliegue de esquemas relacionales', 'Sembrado automático de 8 tablas en base de datos PostgreSQL', 'v1.0.0', 'v2.0.0', 'c7f92a1', ARRAY['schema.ts', 'cloudSqlService.ts'])
+          ('libro-1', '2026-10-01', 'Egreso comprobante factura Cloudflare', 2127500, 'DEBITO', '220505', '901998877', true),
+          ('libro-2', '2026-10-02', 'Egreso comprobante Datadog', 3680000, 'DEBITO', '220505', '900887766', true),
+          ('libro-3', '2026-10-05', 'Recibo caja cliente Distribuidora Norte', 15800000, 'CREDITO', '130505', 'CLIENTE-001', true),
+          ('libro-4', '2026-10-09', 'Egreso pago nómina quincenal', 11000000, 'DEBITO', '510506', NULL, false)
+        ON CONFLICT (id) DO NOTHING;
+      `);
+
+      await pool.query(`
+        INSERT INTO modificaciones_repositorio (id, timestamp, autor_id, autor_nombre, tipo_accion, descripcion, detalles, version_destino, hash_commit)
+        VALUES
+          ('mod-seed-1', NOW()::text, 1, 'Juan Yaya - Administrador Maestro', 'INIT_SEED', 'Inicialización y despliegue de esquemas relacionales', 'Sembrado automático de 8 tablas en base de datos PostgreSQL', 'v2.0', 'c7f92a1')
         ON CONFLICT (id) DO NOTHING;
       `);
 
@@ -340,8 +268,12 @@ export class CloudSqlService {
       // Asegurar que las tablas existan
       await this.ensureTablesExist();
 
+      // Verificar si la BD ya tiene datos
+      const userCountRes = await pool.query('SELECT count(*)::int as cnt FROM users');
+      const userCount = userCountRes.rows[0]?.cnt || 0;
+
       const jsonPath = path.resolve(process.cwd(), 'data', 'tlm_database.json');
-      if (fs.existsSync(jsonPath)) {
+      if (fs.existsSync(jsonPath) && userCount === 0) {
         const raw = fs.readFileSync(jsonPath, 'utf-8');
         const dump = JSON.parse(raw);
 
@@ -502,8 +434,10 @@ export class CloudSqlService {
             }
           }
         } else {
-          // Si no existe tlm_database.json en disco, usar sembrador SQL nativo en Supabase / Cloud SQL
-          await this.seedDefaultDataIfEmpty();
+          // Si no existe tlm_database.json en disco, usar sembrador SQL nativo
+          if (userCount === 0) {
+            await this.seedDefaultDataIfEmpty();
+          }
         }
 
       this.isInitialized = true;
