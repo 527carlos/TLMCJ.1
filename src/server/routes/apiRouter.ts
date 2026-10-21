@@ -1559,26 +1559,42 @@ router.post('/facturas/seed-demo', async (req: Request, res: Response) => {
 });
 
 router.delete('/facturas/:id', async (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ detail: 'El identificador de la factura no es válido.' });
+  }
+
   try {
-    await CloudSqlService.deleteFactura(id);
+    const deleted = await CloudSqlService.deleteFactura(id);
     const idx = db.facturas.findIndex(f => f.id_factura === id);
-    if (idx !== -1) db.facturas.splice(idx, 1);
-    res.json({ mensaje: "Factura eliminada en línea de Google Cloud SQL." });
+    if (idx !== -1) {
+      db.facturas.splice(idx, 1);
+      db.saveToDisk();
+    }
+    if (!deleted && idx === -1) {
+      return res.status(404).json({ detail: 'Factura no encontrada.' });
+    }
+    res.json({ mensaje: 'Factura eliminada correctamente.' });
   } catch (err: any) {
-    res.status(500).json({ detail: "Error eliminando factura de Cloud SQL: " + err.message });
+    res.status(500).json({ detail: 'Error eliminando factura de Cloud SQL: ' + err.message });
   }
 });
 
 router.post('/facturas/bulk-delete', async (req: Request, res: Response) => {
-  const ids: number[] = Array.isArray(req.body) ? req.body : req.body.ids || [];
+  const rawIds: unknown = Array.isArray(req.body) ? req.body : req.body?.ids;
+  const ids = Array.isArray(rawIds)
+    ? rawIds.map((value: unknown) => Number(value)).filter((value: number) => Number.isInteger(value))
+    : [];
+
   try {
     const deletedCount = await CloudSqlService.bulkDeleteFacturas(ids);
+    const previousLength = db.facturas.length;
     db.facturas = db.facturas.filter(f => !ids.includes(f.id_factura));
+    if (db.facturas.length !== previousLength) db.saveToDisk();
     const restantes = (await CloudSqlService.getFacturas()).length;
-    res.json({ mensaje: `Se eliminaron ${deletedCount} facturas en línea de Cloud SQL.`, restantes });
+    res.json({ mensaje: `Se eliminaron ${deletedCount} facturas correctamente.`, restantes });
   } catch (err: any) {
-    res.status(500).json({ detail: "Error en bulk delete de Cloud SQL: " + err.message });
+    res.status(500).json({ detail: 'Error en bulk delete de Cloud SQL: ' + err.message });
   }
 });
 

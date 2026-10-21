@@ -866,8 +866,11 @@ export class CloudSqlService {
 
   public static async deleteFactura(id: number): Promise<boolean> {
     try {
-      const res = await pool.query('DELETE FROM facturas WHERE id = $1 OR id_factura = $1 RETURNING id', [id]);
-      return (res.rowCount || 0) > 0;
+      const deleted = await drizzleDb
+        .delete(schema.facturas)
+        .where(eq(schema.facturas.id, id))
+        .returning({ id: schema.facturas.id });
+      return deleted.length > 0;
     } catch (error) {
       console.error('[CloudSQL] Error deleteFactura:', error);
       throw error;
@@ -877,8 +880,11 @@ export class CloudSqlService {
   public static async bulkDeleteFacturas(ids: number[]): Promise<number> {
     try {
       if (!ids || ids.length === 0) return 0;
-      const res = await pool.query('DELETE FROM facturas WHERE id = ANY($1::int[]) OR id_factura = ANY($1::int[]) RETURNING id', [ids]);
-      return res.rowCount || 0;
+      const deleted = await drizzleDb
+        .delete(schema.facturas)
+        .where(inArray(schema.facturas.id, ids))
+        .returning({ id: schema.facturas.id });
+      return deleted.length;
     } catch (error) {
       console.error('[CloudSQL] Error bulkDeleteFacturas:', error);
       throw error;
