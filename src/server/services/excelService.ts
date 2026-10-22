@@ -159,13 +159,15 @@ export class ExcelService {
       "IMPUESTOS F350": u.permisos.impuestos_f350 ? 'SÍ' : 'NO',
       "CONCILIACION BANCARIA": u.permisos.conciliacion_bancaria ? 'SÍ' : 'NO',
       "TRANSMITIR SIIGO": u.permisos.transmitir_siigo ? 'SÍ' : 'NO',
-      "GESTION USUARIOS": u.permisos.gestion_usuarios ? 'SÍ' : 'NO'
+      "GESTION USUARIOS": u.permisos.gestion_usuarios ? 'SÍ' : 'NO',
+      "BASE DE DATOS": u.permisos.base_datos ? 'SÍ' : 'NO',
+      "ARQUITECTURA ESCALA": u.permisos.arquitectura_escala ? 'SÍ' : 'NO'
     }));
     const wsUsuarios = XLSX.utils.json_to_sheet(usuariosRows);
     wsUsuarios['!cols'] = [
       { wch: 12 }, { wch: 28 }, { wch: 30 }, { wch: 16 }, { wch: 12 },
       { wch: 25 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 20 },
-      { wch: 16 }, { wch: 16 }
+      { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 16 }
     ];
     XLSX.utils.book_append_sheet(wb, wsUsuarios, 'USUARIOS_Y_PERMISOS');
 

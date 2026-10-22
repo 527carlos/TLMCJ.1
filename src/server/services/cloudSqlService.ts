@@ -177,10 +177,10 @@ export class CloudSqlService {
       await pool.query(`
         INSERT INTO users (id, uid, email, nombre_completo, hashed_password, rol, activo, empresas_ids, requiere_cambio_password, permisos)
         VALUES
-          (1, 'juan-yaya-master-uid', 'automatizaciones@tlm.net.co', 'Juan Yaya - Administrador Maestro', 'pass_token_encrypted', 'Administrador', true, ARRAY[1, 2], false, '{"administrador": true, "auditoria_ubl": true, "impuestos_f350": true, "conciliacion_bancaria": true, "transmitir_siigo": true, "gestion_usuarios": true}'::jsonb),
-          (2, 'usr-uid-2', 'contador@tlm.net.co', 'María Paula Gómez', 'pass_token_encrypted', 'Contador', true, ARRAY[1], false, '{"administrador": false, "auditoria_ubl": true, "impuestos_f350": true, "conciliacion_bancaria": true, "transmitir_siigo": true, "gestion_usuarios": false}'::jsonb),
-          (3, 'usr-uid-3', 'analista@tlm.net.co', 'Carlos Andrés Silva', 'pass_token_encrypted', 'Analista', true, ARRAY[1], false, '{"administrador": false, "auditoria_ubl": true, "impuestos_f350": true, "conciliacion_bancaria": false, "transmitir_siigo": false, "gestion_usuarios": false}'::jsonb),
-          (4, 'usr-uid-4', 'auditor@tlm.net.co', 'Diana Marcela Ortiz', 'pass_token_encrypted', 'Auditor', true, ARRAY[1], false, '{"administrador": false, "auditoria_ubl": true, "impuestos_f350": false, "conciliacion_bancaria": false, "transmitir_siigo": false, "gestion_usuarios": false}'::jsonb)
+          (1, 'juan-yaya-master-uid', 'automatizaciones@tlm.net.co', 'Juan Yaya - Administrador Maestro', 'pass_token_encrypted', 'Administrador', true, ARRAY[1, 2], false, '{"administrador": true, "auditoria_ubl": true, "impuestos_f350": true, "conciliacion_bancaria": true, "transmitir_siigo": true, "gestion_usuarios": true, "base_datos": true, "arquitectura_escala": true}'::jsonb),
+          (2, 'usr-uid-2', 'contador@tlm.net.co', 'María Paula Gómez', 'pass_token_encrypted', 'Contador', true, ARRAY[1], false, '{"administrador": false, "auditoria_ubl": true, "impuestos_f350": true, "conciliacion_bancaria": true, "transmitir_siigo": true, "gestion_usuarios": false, "base_datos": false, "arquitectura_escala": false}'::jsonb),
+          (3, 'usr-uid-3', 'analista@tlm.net.co', 'Carlos Andrés Silva', 'pass_token_encrypted', 'Analista', true, ARRAY[1], false, '{"administrador": false, "auditoria_ubl": true, "impuestos_f350": true, "conciliacion_bancaria": false, "transmitir_siigo": false, "gestion_usuarios": false, "base_datos": false, "arquitectura_escala": false}'::jsonb),
+          (4, 'usr-uid-4', 'auditor@tlm.net.co', 'Diana Marcela Ortiz', 'pass_token_encrypted', 'Auditor', true, ARRAY[1], false, '{"administrador": false, "auditoria_ubl": true, "impuestos_f350": false, "conciliacion_bancaria": false, "transmitir_siigo": false, "gestion_usuarios": false, "base_datos": false, "arquitectura_escala": false}'::jsonb)
         ON CONFLICT (id) DO NOTHING;
       `);
 
