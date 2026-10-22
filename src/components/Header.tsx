@@ -25,6 +25,8 @@ export const Header: React.FC<HeaderProps> = ({
   onNavigateToSection,
   primaryColor = '#271a82'
 }) => {
+  const isAdminOrDeveloper = currentUser?.rol === 'Administrador' || currentUser?.rol === 'Desarrollador';
+
   const getCleanInitials = (user: Usuario | null): string => {
     if (!user || !user.nombre_completo) return 'JY';
     const cleaned = user.nombre_completo.replace(/[¿?¡!]/g, '').trim();
@@ -71,6 +73,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       <div className="flex items-center gap-3">
         {/* Repositorio Juan v2.0 Badge */}
+        {isAdminOrDeveloper && (
         <button
           onClick={() => onNavigateToSection && onNavigateToSection('accesos')}
           title="Ver Repositorio Central de Juan Yaya (Versión 2.0)"
@@ -83,6 +86,7 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" title="Multiusuario conectado en vivo"></span>
         </button>
+        )}
 
         {/* Active Company Pill */}
         <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
@@ -96,7 +100,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Brand & Logo Customizer Trigger */}
-        {onOpenBrandCustomizer && (
+        {isAdminOrDeveloper && onOpenBrandCustomizer && (
           <button
             onClick={onOpenBrandCustomizer}
             title="Personalizar Identidad, Logos y Colores TLM"

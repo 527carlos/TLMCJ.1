@@ -630,7 +630,9 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
       impuestos_f350: true,
       conciliacion_bancaria: u.rol !== 'Auditor',
       transmitir_siigo: u.rol === 'Administrador' || u.rol === 'Contador',
-      gestion_usuarios: u.rol === 'Administrador'
+      gestion_usuarios: u.rol === 'Administrador',
+      base_datos: u.rol === 'Administrador' || u.rol === 'Desarrollador',
+      arquitectura_escala: u.rol === 'Administrador' || u.rol === 'Desarrollador'
     });
     setTempEmpresasIds([...u.empresas_ids]);
   };
@@ -2760,7 +2762,9 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
                         impuestos_f350: true,
                         conciliacion_bancaria: true,
                         transmitir_siigo: true,
-                        gestion_usuarios: true
+                        gestion_usuarios: true,
+                        base_datos: true,
+                        arquitectura_escala: true
                       } : {})
                     });
                   }}
@@ -2835,6 +2839,32 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
                     type="checkbox"
                     checked={tempPermisos.gestion_usuarios}
                     onChange={(e) => setTempPermisos({ ...tempPermisos, gestion_usuarios: e.target.checked })}
+                    className="w-4 h-4 accent-[#271a82]"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:bg-slate-50 cursor-pointer">
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block">Base de Datos & Cloud</span>
+                    <span className="text-[11px] text-slate-500">Consultar la base de datos y herramientas de nube</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={tempPermisos.base_datos}
+                    onChange={(e) => setTempPermisos({ ...tempPermisos, base_datos: e.target.checked })}
+                    className="w-4 h-4 accent-[#271a82]"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:bg-slate-50 cursor-pointer">
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block">Arquitectura & Escala</span>
+                    <span className="text-[11px] text-slate-500">Consultar la arquitectura técnica y escalabilidad</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={tempPermisos.arquitectura_escala}
+                    onChange={(e) => setTempPermisos({ ...tempPermisos, arquitectura_escala: e.target.checked })}
                     className="w-4 h-4 accent-[#271a82]"
                   />
                 </label>

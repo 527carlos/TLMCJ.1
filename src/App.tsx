@@ -705,18 +705,30 @@ export default function App() {
             );
           })()}
 
-          {currentSection === 'base-datos' && (
-            <BaseDatosCloudView
-              currentUser={currentUser}
-              onNavigateSection={setCurrentSection}
-              onShowToast={showToast}
-              primaryColor={primaryColor}
-            />
-          )}
+          {currentSection === 'base-datos' && (() => {
+            const canAccessRestrictedModules = currentUser?.rol === 'Administrador' || currentUser?.rol === 'Desarrollador';
+            if (!canAccessRestrictedModules) {
+              setTimeout(() => setCurrentSection('dashboard'), 0);
+              return <div className="flex items-center justify-center h-full text-slate-400 text-sm">No tiene permisos para acceder a este módulo.</div>;
+            }
+            return (
+              <BaseDatosCloudView
+                currentUser={currentUser}
+                onNavigateSection={setCurrentSection}
+                onShowToast={showToast}
+                primaryColor={primaryColor}
+              />
+            );
+          })()}
 
-          {currentSection === 'arquitectura' && (
-            <ArquitecturaView />
-          )}
+          {currentSection === 'arquitectura' && (() => {
+            const canAccessRestrictedModules = currentUser?.rol === 'Administrador' || currentUser?.rol === 'Desarrollador';
+            if (!canAccessRestrictedModules) {
+              setTimeout(() => setCurrentSection('dashboard'), 0);
+              return <div className="flex items-center justify-center h-full text-slate-400 text-sm">No tiene permisos para acceder a este módulo.</div>;
+            }
+            return <ArquitecturaView />;
+          })()}
         </main>
       </div>
 

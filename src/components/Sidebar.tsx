@@ -65,10 +65,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return (cleaned.slice(0, 2) || 'JY').toUpperCase();
   };
 
+  const isAdminOrDeveloper = currentUser?.rol === 'Administrador' || currentUser?.rol === 'Desarrollador';
   const canManageUsers = Boolean(
-    currentUser?.rol === 'Administrador' ||
-    currentUser?.rol === 'Desarrollador' ||
-    currentUser?.permisos?.gestion_usuarios
+    isAdminOrDeveloper || currentUser?.permisos?.gestion_usuarios
   );
 
   const menuItems = [
@@ -85,8 +84,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     ...(canManageUsers
       ? [{ id: 'accesos', label: 'Admin Usuarios & Cloud', icon: Users }]
       : []),
-    { id: 'base-datos', label: 'Base de Datos & Cloud', icon: Database, highlight: true },
-    { id: 'arquitectura', label: 'Arquitectura & Escala', icon: Cpu }
+    ...(isAdminOrDeveloper
+      ? [
+          { id: 'base-datos', label: 'Base de Datos & Cloud', icon: Database, highlight: true },
+          { id: 'arquitectura', label: 'Arquitectura & Escala', icon: Cpu }
+        ]
+      : [])
   ];
 
   return (
@@ -127,7 +130,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <label className="text-[10px] font-bold tracking-wider text-indigo-300 uppercase block">
                 Empresa Activa / Contribuyente
               </label>
-              {onOpenBrandCustomizer && (
+              {isAdminOrDeveloper && onOpenBrandCustomizer && (
                 <button
                   onClick={onOpenBrandCustomizer}
                   title="Personalizar Identidad y Logo TLM"
@@ -285,7 +288,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             )}
             <span className="w-2 h-2 rounded-full bg-emerald-400" title="Siigo Nube Online"></span>
-            {onOpenBrandCustomizer && (
+            {isAdminOrDeveloper && onOpenBrandCustomizer && (
               <button
                 onClick={onOpenBrandCustomizer}
                 className="text-indigo-400 hover:text-white p-1"
