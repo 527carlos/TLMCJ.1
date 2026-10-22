@@ -12,10 +12,7 @@ import {
   ChevronRight,
   ShieldCheck,
   Building2,
-  ExternalLink,
-  Palette,
-  UserCheck,
-  LogIn
+  ExternalLink
 } from 'lucide-react';
 import { Empresa, Usuario } from '../types/index.ts';
 import { TlmLogo } from './TlmLogo.tsx';
@@ -63,19 +60,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   primaryColor = '#271a82',
   sidebarColor = '#1c1343'
 }) => {
-  const getCleanInitials = (user: Usuario | null): string => {
-    if (!user || !user.nombre_completo) return 'JY';
-    const cleaned = user.nombre_completo.replace(/[¿?¡!]/g, '').trim();
-    if (cleaned.toLowerCase().includes('juan') && cleaned.toLowerCase().includes('yaya')) {
-      return 'JY';
-    }
-    const parts = cleaned.split(/\s+/).filter(Boolean);
-    if (parts.length >= 2) {
-      return (parts[0][0] + parts[1][0]).toUpperCase();
-    }
-    return (cleaned.slice(0, 2) || 'JY').toUpperCase();
-  };
-
   const isAdminOrDeveloper = currentUser?.rol === 'Administrador' || currentUser?.rol === 'Desarrollador';
   const canManageUsers = Boolean(
     isAdminOrDeveloper || currentUser?.permisos?.gestion_usuarios
@@ -142,7 +126,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        {/* Company Selector Switcher without unneeded Marca button */}
+        {/* Company Selector Switcher */}
         {!collapsed ? (
           <div 
             className="p-3 border-b border-white/10 transition-colors duration-200"
@@ -155,13 +139,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <div className="relative">
               <select
+                id="empresa-select"
                 value={activeEmpresa?.id_empresa || 1}
+                title={activeEmpresa?.nombre_comercial || 'Seleccionar empresa'}
                 onChange={(e) => {
                   const emp = empresas.find(item => item.id_empresa === parseInt(e.target.value));
                   if (emp) onSelectEmpresa(emp);
                 }}
                 style={{ backgroundColor: adjustHex(sidebarColor, 8) }}
-                className="w-full border border-white/20 rounded-xl px-2.5 py-2 text-xs text-white font-medium focus:outline-none focus:border-[#e64519] transition appearance-none cursor-pointer"
+                className="w-full border border-white/20 rounded-xl pl-3 pr-8 py-2 text-xs text-white font-medium focus:outline-none focus:border-[#e64519] transition appearance-none cursor-pointer truncate leading-normal"
               >
                 {empresas.map((emp, empIdx) => (
                   <option 
@@ -169,11 +155,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     value={emp.id_empresa} 
                     style={{ backgroundColor: sidebarColor, color: '#ffffff' }}
                   >
-                    {emp.nombre_comercial} (NIT: {emp.nit})
+                    {emp.nombre_comercial}
                   </option>
                 ))}
               </select>
-              <Building2 className="w-3.5 h-3.5 text-white/60 absolute right-2.5 top-2.5 pointer-events-none" />
+              <Building2 className="w-3.5 h-3.5 text-white/70 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
           </div>
         ) : (
@@ -220,39 +206,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
-      {/* Footer Status & Official Links without unnecessary session switcher button */}
+      {/* Footer Status & Official Links */}
       <div 
         className="p-3 border-t border-white/10 space-y-2 transition-colors duration-200"
         style={{ backgroundColor: footerBg }}
       >
         {!collapsed ? (
           <>
-            {/* User session status badge (non-clickable, elegant profile card) */}
-            {currentUser && (
-              <div className="w-full bg-white/10 rounded-xl p-2.5 border border-white/15 flex items-center gap-2.5 text-left select-none">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#271a82] to-[#fa9d1c] text-white flex items-center justify-center font-bold text-xs ring-1 ring-white/20 shrink-0 overflow-hidden shadow-xs">
-                  {currentUser.avatar_url ? (
-                    <img
-                      src={currentUser.avatar_url}
-                      alt={currentUser.nombre_completo}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    getCleanInitials(currentUser)
-                  )}
-                </div>
-                <div className="min-w-0 truncate">
-                  <div className="text-[11px] font-bold text-white truncate">
-                    {currentUser.nombre_completo}
-                  </div>
-                  <div className="text-[10px] text-white/75 flex items-center gap-1">
-                    <UserCheck className="w-2.5 h-2.5 text-emerald-400" />
-                    <span>{currentUser.rol}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
             <div className="bg-black/20 rounded-xl p-2 border border-white/10">
               <div className="flex items-center justify-between mb-0.5">
                 <span className="text-[10px] font-medium text-white/80">Estado Siigo Nube</span>
@@ -282,22 +242,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </>
         ) : (
           <div className="flex flex-col items-center gap-2 py-2">
-            {currentUser && (
-              <div 
-                className="w-8 h-8 rounded-full bg-gradient-to-br from-[#271a82] to-[#fa9d1c] text-white flex items-center justify-center font-bold text-xs shadow-xs ring-1 ring-white/20 overflow-hidden"
-                title={`Sesión activa: ${currentUser.nombre_completo} (${currentUser.rol})`}
-              >
-                {currentUser.avatar_url ? (
-                  <img
-                    src={currentUser.avatar_url}
-                    alt={currentUser.nombre_completo}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  getCleanInitials(currentUser)
-                )}
-              </div>
-            )}
             <span className="w-2 h-2 rounded-full bg-emerald-400" title="Siigo Nube Online"></span>
           </div>
         )}
