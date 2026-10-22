@@ -82,7 +82,7 @@ interface AccesosViewProps {
   onDeleteUser: (id: number) => void;
   onToggleAdmin: (id: number) => void;
   onToggleActivo: (id: number) => void;
-  onChangeRole: (id: number, rol: 'Administrador' | 'Contador' | 'Analista' | 'Auditor') => void;
+  onChangeRole: (id: number, rol: 'Administrador' | 'Contador' | 'Analista' | 'Auditor' | 'Desarrollador') => void;
   onUpdatePermisos: (id: number, permisos: PermisosUsuario) => void;
   onUpdateEmpresas: (id: number, empresas_ids: number[]) => void;
   onSaveSiigoConfig: (config: { siigo_username: string; siigo_access_key: string; siigo_document_id: number }) => void;
@@ -170,7 +170,7 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
   const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState(false);
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserRol, setNewUserRol] = useState<'Administrador' | 'Contador' | 'Analista' | 'Auditor'>('Analista');
+  const [newUserRol, setNewUserRol] = useState<'Administrador' | 'Contador' | 'Analista' | 'Auditor' | 'Desarrollador'>('Analista');
   const [newUserPassword, setNewUserPassword] = useState('JuanTLM2026!');
   const [newUserEmpresas, setNewUserEmpresas] = useState<number[]>([1]);
   const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -201,7 +201,7 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
 
   // User search and filter state
   const [userSearchTerm, setUserSearchTerm] = useState('');
-  const [userRoleFilter, setUserRoleFilter] = useState<'TODOS' | 'Administrador' | 'Contador' | 'Analista' | 'Auditor' | 'PENDIENTES'>('TODOS');
+  const [userRoleFilter, setUserRoleFilter] = useState<'TODOS' | 'Administrador' | 'Contador' | 'Analista' | 'Auditor' | 'Desarrollador' | 'PENDIENTES'>('TODOS');
   const [isSyncingGcpIam, setIsSyncingGcpIam] = useState(false);
   const [gcpIamSyncMsg, setGcpIamSyncMsg] = useState<string | null>(null);
 
@@ -215,8 +215,9 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
   const isAdmin = Boolean(
     isJuan ||
     currentUser?.rol === 'Administrador' ||
+    currentUser?.rol === 'Desarrollador' ||
     currentUser?.permisos?.administrador ||
-    !currentUser // Default to full owner access if session is resolving
+    currentUser?.permisos?.gestion_usuarios
   );
 
   const handleSyncGcpIam = async () => {
@@ -985,7 +986,7 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
                 </div>
 
                 <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0 text-xs">
-                  {(['TODOS', 'Administrador', 'Contador', 'Analista', 'Auditor', 'PENDIENTES'] as const).map(f => (
+                  {(['TODOS', 'Administrador', 'Desarrollador', 'Contador', 'Analista', 'Auditor', 'PENDIENTES'] as const).map(f => (
                     <button
                       key={f}
                       onClick={() => setUserRoleFilter(f)}
@@ -1092,6 +1093,7 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
                             className="bg-white border border-slate-300 hover:border-[#271a82] rounded-lg px-2 py-1 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#271a82]/20 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                           >
                             <option value="Administrador">Administrador</option>
+                            <option value="Desarrollador">Desarrollador</option>
                             <option value="Contador">Contador</option>
                             <option value="Analista">Analista</option>
                             <option value="Auditor">Auditor</option>

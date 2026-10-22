@@ -64,6 +64,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
     return (cleaned.slice(0, 2) || 'JY').toUpperCase();
   };
+
+  const canManageUsers = Boolean(
+    currentUser?.rol === 'Administrador' ||
+    currentUser?.rol === 'Desarrollador' ||
+    currentUser?.permisos?.gestion_usuarios
+  );
+
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard Directivo', icon: LayoutDashboard },
     { 
@@ -75,7 +82,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'centro-fiscal', label: 'Centro Fiscal (F350)', icon: FileSpreadsheet },
     { id: 'conciliacion', label: 'Conciliación Bancaria', icon: Scale },
     { id: 'cerebro', label: 'Cerebro Contable PUC', icon: BookOpen },
-    { id: 'accesos', label: 'Admin Usuarios & Cloud', icon: Users },
+    ...(canManageUsers
+      ? [{ id: 'accesos', label: 'Admin Usuarios & Cloud', icon: Users }]
+      : []),
     { id: 'base-datos', label: 'Base de Datos & Cloud', icon: Database, highlight: true },
     { id: 'arquitectura', label: 'Arquitectura & Escala', icon: Cpu }
   ];

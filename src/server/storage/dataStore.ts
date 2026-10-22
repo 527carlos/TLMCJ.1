@@ -2,9 +2,18 @@ import fs from 'fs';
 import path from 'path';
 import type { Usuario, PermisosUsuario, Empresa, Factura, CuentaPUC, BalanceTercero, MovimientoBancario, MovimientoLibro, ModificacionRepositorio, RepositorioInfo, NotificacionSeguridad, GoogleDriveConfig, GoogleDriveFile, GoogleDriveStatus, DesarrolladorAcceso, PermisosCodigo } from '../domain/types.ts';
 
-export function getDefaultPermissions(rol: 'Administrador' | 'Contador' | 'Analista' | 'Auditor'): PermisosUsuario {
+export function getDefaultPermissions(rol: 'Administrador' | 'Contador' | 'Analista' | 'Auditor' | 'Desarrollador'): PermisosUsuario {
   switch (rol) {
     case 'Administrador':
+      return {
+        administrador: true,
+        auditoria_ubl: true,
+        impuestos_f350: true,
+        conciliacion_bancaria: true,
+        transmitir_siigo: true,
+        gestion_usuarios: true,
+      };
+    case 'Desarrollador':
       return {
         administrador: true,
         auditoria_ubl: true,

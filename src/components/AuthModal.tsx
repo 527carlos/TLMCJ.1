@@ -1083,95 +1083,117 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           {/* TAB 5: CAMBIO DE ROL / SWITCH USER */}
           {tab === 'switch' && (
             <div className="space-y-3">
-              <p className="text-xs text-slate-500">
-                Selecciona cualquier usuario registrado para cambiar de contexto de trabajo y verificar permisos de rol:
-              </p>
-
-              <div className="space-y-2">
-                {usuarios.map((u, uIdx) => {
-                  const isCurrent = currentUser?.id_usuario === u.id_usuario;
-                  const hasPendingForcedChange = u.requiere_cambio_password === true;
-
+              {(() => {
+                const canSwitchUsers = currentUser?.rol === 'Administrador' || currentUser?.rol === 'Desarrollador' || currentUser?.permisos?.gestion_usuarios;
+                if (!canSwitchUsers) {
                   return (
-                    <div
-                      key={`switch-user-${u.id_usuario}-${u.email || uIdx}`}
-                      onClick={() => {
-                        if (!u.activo) {
-                          onShowToast(`Usuario pendiente de aprobación por el Administrador Maestro`, 'error');
-                          return;
-                        }
-                        if (hasPendingForcedChange) {
-                          setMustChangeUser(u);
-                          setNuevaPassword('');
-                          setConfirmarPassword('');
-                          setTab('cambio_obligatorio');
-                          onShowToast(`⚠️ ${u.nombre_completo} tiene una contraseña provisional pendiente de cambio.`, 'info');
-                          return;
-                        }
-                        onSelectUser(u);
-                        onShowToast(`Contexto cambiado a ${u.nombre_completo}`);
-                        onClose();
-                      }}
-                      className={`p-3 rounded-xl border transition flex items-center justify-between cursor-pointer ${
-                        isCurrent
-                          ? 'bg-indigo-50 border-[#271a82] shadow-xs'
-                          : u.activo
-                          ? 'bg-white hover:bg-[#f8f9fa] border-slate-200'
-                          : 'bg-amber-50/60 border-amber-200 opacity-70'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden shadow-xs ring-1 ring-black/5 ${
-                          u.rol === 'Administrador'
-                            ? 'bg-[#271a82] text-white'
-                            : u.rol === 'Contador'
-                            ? 'bg-[#4059aa] text-white'
-                            : u.rol === 'Auditor'
-                            ? 'bg-[#fa9d1c] text-white'
-                            : 'bg-slate-700 text-white'
-                        }`}>
-                          {u.avatar_url ? (
-                            <img
-                              src={u.avatar_url}
-                              alt={u.nombre_completo}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            getCleanInitials(u.nombre_completo)
-                          )}
-                        </div>
-
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-slate-800">{u.nombre_completo}</span>
-                            {isCurrent && (
-                              <span className="text-[10px] bg-[#271a82] text-white font-extrabold px-1.5 py-0.2 rounded">
-                                Activo
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[11px] text-slate-500 block">{u.email}</span>
-                        </div>
-                      </div>
-
-                      <div className="text-right flex flex-col items-end gap-1">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full block ${
-                          u.activo
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : 'bg-amber-100 text-amber-800'
-                        }`}>
-                          {u.activo ? u.rol : 'Pendiente Aprobación'}
-                        </span>
-                        {hasPendingForcedChange && (
-                          <span className="text-[10px] text-amber-700 font-bold bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded flex items-center gap-1">
-                            ⚠️ Debe cambiar clave
-                          </span>
-                        )}
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
+                      <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <h4 className="text-xs font-bold text-amber-900">Cambio de usuario restringido</h4>
+                        <p className="text-[11px] text-amber-800 mt-1">
+                          Solo los perfiles de Administrador y Desarrollador pueden cambiar de contexto de usuario. Su rol actual ({currentUser?.rol || 'Sin rol'}) no tiene esta facultad.
+                        </p>
                       </div>
                     </div>
                   );
-                })}
-              </div>
+                }
+                return (
+                  <>
+                    <p className="text-xs text-slate-500">
+                      Selecciona cualquier usuario registrado para cambiar de contexto de trabajo y verificar permisos de rol:
+                    </p>
+
+                    <div className="space-y-2">
+                      {usuarios.map((u, uIdx) => {
+                        const isCurrent = currentUser?.id_usuario === u.id_usuario;
+                        const hasPendingForcedChange = u.requiere_cambio_password === true;
+
+                        return (
+                          <div
+                            key={`switch-user-${u.id_usuario}-${u.email || uIdx}`}
+                            onClick={() => {
+                              if (!u.activo) {
+                                onShowToast(`Usuario pendiente de aprobación por el Administrador Maestro`, 'error');
+                                return;
+                              }
+                              if (hasPendingForcedChange) {
+                                setMustChangeUser(u);
+                                setNuevaPassword('');
+                                setConfirmarPassword('');
+                                setTab('cambio_obligatorio');
+                                onShowToast(`⚠️ ${u.nombre_completo} tiene una contraseña provisional pendiente de cambio.`, 'info');
+                                return;
+                              }
+                              onSelectUser(u);
+                              onShowToast(`Contexto cambiado a ${u.nombre_completo}`);
+                              onClose();
+                            }}
+                            className={`p-3 rounded-xl border transition flex items-center justify-between cursor-pointer ${
+                              isCurrent
+                                ? 'bg-indigo-50 border-[#271a82] shadow-xs'
+                                : u.activo
+                                ? 'bg-white hover:bg-[#f8f9fa] border-slate-200'
+                                : 'bg-amber-50/60 border-amber-200 opacity-70'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden shadow-xs ring-1 ring-black/5 ${
+                                u.rol === 'Administrador'
+                                  ? 'bg-[#271a82] text-white'
+                                  : u.rol === 'Desarrollador'
+                                  ? 'bg-[#0f766e] text-white'
+                                  : u.rol === 'Contador'
+                                  ? 'bg-[#4059aa] text-white'
+                                  : u.rol === 'Auditor'
+                                  ? 'bg-[#fa9d1c] text-white'
+                                  : 'bg-slate-700 text-white'
+                              }`}>
+                                {u.avatar_url ? (
+                                  <img
+                                    src={u.avatar_url}
+                                    alt={u.nombre_completo}
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  getCleanInitials(u.nombre_completo)
+                                )}
+                              </div>
+
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-bold text-slate-800">{u.nombre_completo}</span>
+                                  {isCurrent && (
+                                    <span className="text-[10px] bg-[#271a82] text-white font-extrabold px-1.5 py-0.2 rounded">
+                                      Activo
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[11px] text-slate-500 block">{u.email}</span>
+                              </div>
+                            </div>
+
+                            <div className="text-right flex flex-col items-end gap-1">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full block ${
+                                u.activo
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}>
+                                {u.activo ? u.rol : 'Pendiente Aprobación'}
+                              </span>
+                              {hasPendingForcedChange && (
+                                <span className="text-[10px] text-amber-700 font-bold bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded flex items-center gap-1">
+                                  ⚠️ Debe cambiar clave
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           )}
 

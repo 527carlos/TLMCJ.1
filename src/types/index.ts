@@ -55,7 +55,7 @@ export interface Usuario {
   id_usuario: number;
   nombre_completo: string;
   email: string;
-  rol: 'Administrador' | 'Contador' | 'Analista' | 'Auditor';
+  rol: 'Administrador' | 'Contador' | 'Analista' | 'Auditor' | 'Desarrollador';
   activo: boolean;
   empresas_ids: number[];
   permisos?: PermisosUsuario;

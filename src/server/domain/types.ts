@@ -44,7 +44,7 @@ export interface Usuario {
   nombre_completo: string;
   email: string;
   hashed_password?: string;
-  rol: 'Administrador' | 'Contador' | 'Analista' | 'Auditor';
+  rol: 'Administrador' | 'Contador' | 'Analista' | 'Auditor' | 'Desarrollador';
   activo: boolean;
   empresas_ids: number[];
   permisos: PermisosUsuario;

@@ -439,7 +439,7 @@ export default function App() {
     }
   };
 
-  const handleChangeRole = async (id: number, rol: 'Administrador' | 'Contador' | 'Analista' | 'Auditor') => {
+  const handleChangeRole = async (id: number, rol: 'Administrador' | 'Contador' | 'Analista' | 'Auditor' | 'Desarrollador') => {
     try {
       setUsuarios(prev => prev.map(u => u.id_usuario === id ? { ...u, rol } : u));
       const res = await fetch(`/api/v1/auth/usuarios/${id}/rol`, {
@@ -672,27 +672,38 @@ export default function App() {
             />
           )}
 
-          {currentSection === 'accesos' && (
-            <AccesosView
-              usuarios={usuarios}
-              activeEmpresa={activeEmpresa}
-              empresas={empresas}
-              currentUser={currentUser}
-              onApproveUser={handleApproveUser}
-              onDeleteUser={handleDeleteUser}
-              onToggleAdmin={handleToggleAdmin}
-              onToggleActivo={handleToggleActivo}
-              onChangeRole={handleChangeRole}
-              onUpdatePermisos={handleUpdatePermisos}
-              onUpdateEmpresas={handleUpdateEmpresas}
-              onSaveSiigoConfig={handleSaveSiigoConfig}
-              onUpdateAvatar={handleUpdateAvatar}
-              onRefreshUsers={loadData}
-              onShowToast={showToast}
-              onSelectUser={handleSelectUser}
-              primaryColor={primaryColor}
-            />
-          )}
+          {currentSection === 'accesos' && (() => {
+            const canManage = currentUser?.rol === 'Administrador' || currentUser?.rol === 'Desarrollador' || currentUser?.permisos?.gestion_usuarios;
+            if (!canManage) {
+              setTimeout(() => setCurrentSection('dashboard'), 0);
+              return (
+                <div className="flex items-center justify-center h-full text-slate-400 text-sm">
+                  No tiene permisos para acceder a la gestión de usuarios.
+                </div>
+              );
+            }
+            return (
+              <AccesosView
+                usuarios={usuarios}
+                activeEmpresa={activeEmpresa}
+                empresas={empresas}
+                currentUser={currentUser}
+                onApproveUser={handleApproveUser}
+                onDeleteUser={handleDeleteUser}
+                onToggleAdmin={handleToggleAdmin}
+                onToggleActivo={handleToggleActivo}
+                onChangeRole={handleChangeRole}
+                onUpdatePermisos={handleUpdatePermisos}
+                onUpdateEmpresas={handleUpdateEmpresas}
+                onSaveSiigoConfig={handleSaveSiigoConfig}
+                onUpdateAvatar={handleUpdateAvatar}
+                onRefreshUsers={loadData}
+                onShowToast={showToast}
+                onSelectUser={handleSelectUser}
+                primaryColor={primaryColor}
+              />
+            );
+          })()}
 
           {currentSection === 'base-datos' && (
             <BaseDatosCloudView
