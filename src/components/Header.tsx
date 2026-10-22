@@ -104,7 +104,8 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenBrandCustomizer}
             title="Personalizar Identidad, Logos y Colores TLM"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#271a82]/5 hover:bg-[#271a82]/10 border border-[#271a82]/20 text-[#271a82] text-xs font-bold transition cursor-pointer"
+            style={{ color: primaryColor, borderColor: `${primaryColor}40`, backgroundColor: `${primaryColor}10` }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90 cursor-pointer"
           >
             <Palette className="w-3.5 h-3.5 text-[#e64519]" />
             <span className="hidden sm:inline">Identidad & Logos</span>

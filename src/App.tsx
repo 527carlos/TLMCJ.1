@@ -30,6 +30,9 @@ export default function App() {
   const [primaryColor, setPrimaryColor] = useState<string>(() => {
     return localStorage.getItem('tlm_primary_color') || '#271a82';
   });
+  const [sidebarColor, setSidebarColor] = useState<string>(() => {
+    return localStorage.getItem('tlm_sidebar_color') || '#1c1343';
+  });
   const [customLogoUrl, setCustomLogoUrl] = useState<string | null>(() => {
     return localStorage.getItem('tlm_custom_logo') || null;
   });
@@ -55,6 +58,7 @@ export default function App() {
 
   const handleSelectUser = (u: Usuario | null) => {
     setCurrentUser(u);
+    setIsAuthModalOpen(false);
     if (u) {
       localStorage.setItem('tlm_current_user_id', u.id_usuario.toString());
       localStorage.setItem('tlm_current_user', JSON.stringify(u));
@@ -68,22 +72,37 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.style.setProperty('--tlm-primary', primaryColor);
-  }, [primaryColor]);
+    document.documentElement.style.setProperty('--tlm-sidebar-bg', sidebarColor);
+  }, [primaryColor, sidebarColor]);
 
-  const handleSaveCustomLogo = async (url: string | null, variantTitle?: string, primaryColorHex?: string) => {
+  const handleSaveCustomLogo = async (
+    url: string | null, 
+    variantTitle?: string, 
+    primaryColorHex?: string,
+    sidebarColorHex?: string
+  ) => {
     setCustomLogoUrl(url);
     const newColor = primaryColorHex || primaryColor;
+    const newSidebarColor = sidebarColorHex || sidebarColor;
+
     if (primaryColorHex) {
       setPrimaryColor(primaryColorHex);
       localStorage.setItem('tlm_primary_color', primaryColorHex);
       document.documentElement.style.setProperty('--tlm-primary', primaryColorHex);
     }
+
+    if (sidebarColorHex) {
+      setSidebarColor(sidebarColorHex);
+      localStorage.setItem('tlm_sidebar_color', sidebarColorHex);
+      document.documentElement.style.setProperty('--tlm-sidebar-bg', sidebarColorHex);
+    }
+
     if (url) {
       localStorage.setItem('tlm_custom_logo', url);
-      showToast(`¡${variantTitle || 'Logotipo corporativo'} y color principal (${newColor}) aplicados con éxito!`);
+      showToast(`¡${variantTitle || 'Logotipo corporativo'} y colores aplicados con éxito!`);
     } else {
       localStorage.removeItem('tlm_custom_logo');
-      showToast(`¡Identidad oficial TLM y color principal (${newColor}) aplicados con éxito!`);
+      showToast(`¡Identidad oficial TLM y colores aplicados con éxito!`);
     }
 
     try {
@@ -94,6 +113,7 @@ export default function App() {
           customLogoUrl: url,
           variantTitle,
           temaAcento: newColor,
+          sidebarColor: newSidebarColor,
           autor_nombre: currentUser?.nombre_completo || 'Juan Yaya - Administrador Maestro'
         })
       });
@@ -185,11 +205,13 @@ export default function App() {
       setUsuarios(uniqueUsuarios);
       if (uniqueUsuarios.length > 0) {
         const savedId = localStorage.getItem('tlm_current_user_id');
-        const activeId = savedId ? Number(savedId) : (currentUser?.id_usuario || 1);
-        const match = uniqueUsuarios.find((u: Usuario) => u.id_usuario === activeId) || uniqueUsuarios[0];
-        setCurrentUser(match);
-        localStorage.setItem('tlm_current_user_id', match.id_usuario.toString());
-        localStorage.setItem('tlm_current_user', JSON.stringify(match));
+        if (savedId) {
+          const match = uniqueUsuarios.find((u: Usuario) => u.id_usuario === Number(savedId));
+          if (match) {
+            setCurrentUser(match);
+            localStorage.setItem('tlm_current_user', JSON.stringify(match));
+          }
+        }
       }
 
       // 7. Initial Conciliacion run
@@ -201,7 +223,7 @@ export default function App() {
       const dataConcil = await resConcil.json();
       setConciliacionSummary(dataConcil);
 
-      // 8. Fetch Branding Config & Primary Color
+      // 8. Fetch Branding Config & Primary/Sidebar Colors
       try {
         const resBranding = await fetch('/api/v1/sistema/branding');
         if (resBranding.ok) {
@@ -213,6 +235,10 @@ export default function App() {
             if (dataBranding.temaAcento && !localStorage.getItem('tlm_primary_color')) {
               setPrimaryColor(dataBranding.temaAcento);
               document.documentElement.style.setProperty('--tlm-primary', dataBranding.temaAcento);
+            }
+            if (dataBranding.sidebarColor && !localStorage.getItem('tlm_sidebar_color')) {
+              setSidebarColor(dataBranding.sidebarColor);
+              document.documentElement.style.setProperty('--tlm-sidebar-bg', dataBranding.sidebarColor);
             }
           }
         }
@@ -588,10 +614,9 @@ export default function App() {
         onSelectEmpresa={setActiveEmpresa}
         pendingInvoicesCount={pendingInvoices}
         customLogoUrl={customLogoUrl}
-        onOpenBrandCustomizer={() => setIsBrandModalOpen(true)}
         currentUser={currentUser}
-        onOpenAuthModal={() => setIsAuthModalOpen(true)}
         primaryColor={primaryColor}
+        sidebarColor={sidebarColor}
       />
 
       {/* Content Area */}
@@ -763,6 +788,7 @@ export default function App() {
         customLogoUrl={customLogoUrl}
         onSaveCustomLogo={handleSaveCustomLogo}
         primaryColor={primaryColor}
+        sidebarColor={sidebarColor}
         currentUser={currentUser}
         onSwitchToJuan={() => {
           const juan = usuarios.find(u => u.id_usuario === 1 || u.email === 'automatizaciones@tlm.net.co') || usuarios[0];

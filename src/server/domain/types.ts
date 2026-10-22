@@ -5,6 +5,8 @@ export interface PermisosUsuario {
   conciliacion_bancaria: boolean;
   transmitir_siigo: boolean;
   gestion_usuarios: boolean;
+  base_datos?: boolean;
+  arquitectura_escala?: boolean;
 }
 
 export interface NotificacionSeguridad {

@@ -78,6 +78,7 @@ export class DataStore {
     customLogoUrl: null as string | null,
     variantTitle: "Logotipo Oficial TLM Completo",
     temaAcento: "#271a82",
+    sidebarColor: "#1c1343",
     subtitulo: "Get Adviced",
     autor_nombre: "Juan Yaya - Administrador Maestro",
     updatedAt: new Date().toISOString()

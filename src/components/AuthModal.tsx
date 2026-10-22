@@ -192,7 +192,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         throw new Error(data.detail || 'Error al iniciar sesión');
       }
 
-      const targetUser = usuarios.find(u => u.email.toLowerCase() === email.trim().toLowerCase()) || data.usuario;
+      const targetUser = data.usuario || usuarios.find(u => u.email.toLowerCase() === email.trim().toLowerCase());
 
       // DETECCIÓN DE CONTRASEÑA PROVISIONAL -> EXIGIR CAMBIO OBLIGATORIO
       if (data.requiere_cambio_password || targetUser?.requiere_cambio_password) {
@@ -212,14 +212,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         return;
       }
 
-      if (targetUser) {
-        onSelectUser(targetUser);
-        onShowToast(`¡Bienvenido/a ${targetUser.nombre_completo}!`);
-        onClose();
-      } else {
-        onShowToast(`Sesión iniciada con éxito.`);
-        onClose();
-      }
+      const finalUser: Usuario = targetUser || {
+        id_usuario: data.usuario_id || 1,
+        nombre_completo: data.usuario_nombre || 'Usuario TLM',
+        email: data.email || email.trim(),
+        rol: data.rol || 'Analista',
+        activo: true,
+        empresas_ids: data.empresas_ids || [1],
+        avatar_url: data.avatar_url || null,
+        requiere_cambio_password: false
+      };
+
+      onSelectUser(finalUser);
+      onShowToast(`¡Bienvenido/a ${finalUser.nombre_completo}! Accediendo a la Consola...`);
+      onClose();
     } catch (err: any) {
       setErrorMsg(err.message || 'Error de conexión');
     } finally {

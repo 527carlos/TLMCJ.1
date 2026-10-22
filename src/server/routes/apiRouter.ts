@@ -594,12 +594,13 @@ router.get('/sistema/branding', (_req: Request, res: Response) => {
 });
 
 router.put('/sistema/branding', (req: Request, res: Response) => {
-  const { customLogoUrl, variantTitle, subtitulo, temaAcento, autor_nombre } = req.body;
+  const { customLogoUrl, variantTitle, subtitulo, temaAcento, sidebarColor, autor_nombre } = req.body;
   const config = db.updateBrandingConfig({
     customLogoUrl,
     variantTitle,
     subtitulo,
     temaAcento,
+    sidebarColor,
     autor_nombre: autor_nombre || "Juan Yaya - Administrador Maestro"
   });
   res.json({
