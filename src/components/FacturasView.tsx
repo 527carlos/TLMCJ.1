@@ -114,11 +114,11 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#271a82] hover:bg-[#1c1343] text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer">
             <UploadCloud className="w-4 h-4 text-[#fa9d1c]" />
-            <span>Cargar XMLs DIAN</span>
+            <span>Cargar XMLs / ZIPs DIAN</span>
             <input
               type="file"
               multiple
-              accept=".xml"
+              accept=".xml,.zip,application/zip,text/xml,application/xml"
               className="hidden"
               onChange={(e) => {
                 if (e.target.files && e.target.files.length > 0) {

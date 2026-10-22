@@ -63,17 +63,40 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [avatarInputUrl, setAvatarInputUrl] = useState('');
   const [isSavingAvatar, setIsSavingAvatar] = useState(false);
 
+  // Verificación estricta de Juan Yaya / Administrador Maestro / Desarrollador
+  const isJuanOrAdmin = Boolean(
+    currentUser && (
+      currentUser.rol === 'Administrador' ||
+      currentUser.id_usuario === 1 ||
+      currentUser.email?.toLowerCase().includes('automatizaciones@tlm.net.co') ||
+      currentUser.email?.toLowerCase().includes('juan.yaya') ||
+      currentUser.permisos?.administrador === true
+    )
+  );
+
   useEffect(() => {
     if (isOpen) {
       if (currentUser?.requiere_cambio_password) {
         setMustChangeUser(currentUser);
         setTab('cambio_obligatorio');
+      } else if (!currentUser) {
+        // Cuando no ha ingresado (se van a logear): solo login, recuperar o register
+        if (initialTab === 'recuperar' || initialTab === 'register') {
+          setTab(initialTab);
+        } else {
+          setTab('login');
+        }
       } else {
-        setTab(initialTab);
+        // Cuando ya ha ingresado: si no es admin y pidió switch, ir a seguridad o avatar
+        if (initialTab === 'switch' && !isJuanOrAdmin) {
+          setTab('seguridad');
+        } else {
+          setTab(initialTab);
+        }
       }
       setErrorMsg(null);
     }
-  }, [isOpen, currentUser, initialTab]);
+  }, [isOpen, currentUser, initialTab, isJuanOrAdmin]);
 
   const getCleanInitials = (name?: string | null): string => {
     if (!name) return 'JY';
@@ -561,87 +584,109 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Navigation Tabs (Hidden during forced password change) */}
         {tab !== 'cambio_obligatorio' && (
-          <div className="flex border-b border-slate-200 bg-slate-50 px-4 pt-3 gap-1.5 overflow-x-auto">
-            <button
-              onClick={() => { setTab('login'); setErrorMsg(null); }}
-              className={`px-3 py-2 text-xs font-bold rounded-t-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                tab === 'login'
-                  ? 'bg-white text-[#271a82] border-t-2 border-[#271a82] shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <LogIn className="w-3.5 h-3.5 text-[#e64519]" />
-              Iniciar Sesión
-            </button>
+          <div className="flex border-b border-slate-200 bg-slate-100/80 p-2 gap-1.5 overflow-x-auto scroll-smooth">
+            {/* 1. Cuando se van a logear (sin sesión iniciada): solo Iniciar Sesión, Recuperar Clave y Registrarse */}
+            {!currentUser ? (
+              <>
+                <button
+                  onClick={() => { setTab('login'); setErrorMsg(null); }}
+                  className={`px-3.5 py-2 text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                    tab === 'login'
+                      ? 'bg-white text-[#271a82] shadow-xs border border-slate-200 ring-1 ring-slate-900/5'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                  }`}
+                >
+                  <LogIn className="w-3.5 h-3.5 text-[#e64519]" />
+                  Iniciar Sesión
+                </button>
 
-            <button
-              onClick={() => { setTab('recuperar'); setErrorMsg(null); setRecoveryStep(1); }}
-              className={`px-3 py-2 text-xs font-bold rounded-t-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                tab === 'recuperar'
-                  ? 'bg-white text-[#271a82] border-t-2 border-[#fa9d1c] shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <KeyRound className="w-3.5 h-3.5 text-[#fa9d1c]" />
-              Recuperar Clave
-            </button>
+                <button
+                  onClick={() => { setTab('recuperar'); setErrorMsg(null); setRecoveryStep(1); }}
+                  className={`px-3.5 py-2 text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                    tab === 'recuperar'
+                      ? 'bg-white text-[#271a82] shadow-xs border border-slate-200 ring-1 ring-slate-900/5'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                  }`}
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-[#fa9d1c]" />
+                  Recuperar Mi Clave
+                </button>
 
-            {currentUser && (
-              <button
-                onClick={() => { setTab('seguridad'); setErrorMsg(null); }}
-                className={`px-3 py-2 text-xs font-bold rounded-t-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                  tab === 'seguridad'
-                    ? 'bg-white text-[#271a82] border-t-2 border-emerald-600 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Shield className="w-3.5 h-3.5 text-emerald-600" />
-                Mi Contraseña
-              </button>
+                <button
+                  onClick={() => { setTab('register'); setErrorMsg(null); }}
+                  className={`px-3.5 py-2 text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                    tab === 'register'
+                      ? 'bg-white text-[#271a82] shadow-xs border border-slate-200 ring-1 ring-slate-900/5'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                  }`}
+                >
+                  <UserPlus className="w-3.5 h-3.5 text-[#777eec]" />
+                  Registrarse
+                </button>
+              </>
+            ) : (
+              <>
+                {/* 2. Cuando ya ha ingresado: Mi Contraseña y Editar Avatar */}
+                <button
+                  onClick={() => { setTab('seguridad'); setErrorMsg(null); }}
+                  className={`px-3.5 py-2 text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                    tab === 'seguridad'
+                      ? 'bg-white text-[#271a82] shadow-xs border border-slate-200 ring-1 ring-slate-900/5'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                  }`}
+                >
+                  <Shield className="w-3.5 h-3.5 text-emerald-600" />
+                  Mi Contraseña
+                </button>
+
+                {/* Editar el avatar solo cuando ya haya ingresado */}
+                <button
+                  onClick={() => { setTab('avatar'); setErrorMsg(null); }}
+                  className={`px-3.5 py-2 text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                    tab === 'avatar'
+                      ? 'bg-white text-[#271a82] shadow-xs border border-slate-200 ring-1 ring-slate-900/5'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                  }`}
+                >
+                  <Camera className="w-3.5 h-3.5 text-[#e64519]" />
+                  Editar Avatar / JY
+                </button>
+
+                {/* 3. El resto de las funciones son solo para Juan el administrador y el desarrollador */}
+                {isJuanOrAdmin && (
+                  <>
+                    <button
+                      onClick={() => { setTab('switch'); setErrorMsg(null); }}
+                      className={`px-3.5 py-2 text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                        tab === 'switch'
+                          ? 'bg-white text-[#271a82] shadow-xs border border-slate-200 ring-1 ring-slate-900/5'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      }`}
+                    >
+                      <User className="w-3.5 h-3.5 text-[#fa9d1c]" />
+                      Cambio de Rol ({usuarios.length})
+                    </button>
+
+                    <button
+                      onClick={() => { setTab('register'); setErrorMsg(null); }}
+                      className={`px-3.5 py-2 text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                        tab === 'register'
+                          ? 'bg-white text-[#271a82] shadow-xs border border-slate-200 ring-1 ring-slate-900/5'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      }`}
+                    >
+                      <UserPlus className="w-3.5 h-3.5 text-[#777eec]" />
+                      Crear Usuario
+                    </button>
+                  </>
+                )}
+              </>
             )}
-
-            <button
-              onClick={() => { setTab('switch'); setErrorMsg(null); }}
-              className={`px-3 py-2 text-xs font-bold rounded-t-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                tab === 'switch'
-                  ? 'bg-white text-[#271a82] border-t-2 border-[#fa9d1c] shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <User className="w-3.5 h-3.5 text-[#fa9d1c]" />
-              Cambio de Rol ({usuarios.length})
-            </button>
-
-            {currentUser && (
-              <button
-                onClick={() => { setTab('avatar'); setErrorMsg(null); }}
-                className={`px-3 py-2 text-xs font-bold rounded-t-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                  tab === 'avatar'
-                    ? 'bg-white text-[#271a82] border-t-2 border-[#e64519] shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Camera className="w-3.5 h-3.5 text-[#e64519]" />
-                Avatar / JY
-              </button>
-            )}
-
-            <button
-              onClick={() => { setTab('register'); setErrorMsg(null); }}
-              className={`px-3 py-2 text-xs font-bold rounded-t-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                tab === 'register'
-                  ? 'bg-white text-[#271a82] border-t-2 border-[#777eec] shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <UserPlus className="w-3.5 h-3.5 text-[#777eec]" />
-              Registro
-            </button>
           </div>
         )}
 
         {/* Content Body */}
-        <div className="p-6 space-y-4 max-h-[65vh] overflow-y-auto">
+        <div className="p-6 space-y-4 max-h-[68vh] overflow-y-auto overscroll-contain">
           {errorMsg && (
             <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
@@ -714,47 +759,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </button>
               </div>
 
-              {/* Botones de Relleno Rápido de Prueba */}
-              <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl text-[11px] text-indigo-900 space-y-2">
-                <span className="font-bold flex items-center justify-between text-indigo-950">
-                  <span>Credenciales para ingreso rápido:</span>
-                  <span className="text-[10px] text-indigo-600 font-normal">Clic para rellenar</span>
+              <div className="pt-2 text-center">
+                <span className="text-xs text-slate-500">
+                  ¿No tienes una cuenta aún?{' '}
+                  <button
+                    type="button"
+                    onClick={() => { setTab('register'); setErrorMsg(null); }}
+                    className="text-[#271a82] hover:text-[#e64519] font-bold hover:underline cursor-pointer"
+                  >
+                    Regístrate aquí
+                  </button>
                 </span>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEmail('automatizaciones@tlm.net.co');
-                      setPassword('admin123');
-                    }}
-                    className="p-1.5 rounded-lg bg-white border border-indigo-200 hover:border-[#271a82] hover:bg-indigo-50/50 text-left transition cursor-pointer"
-                  >
-                    <div className="font-bold text-[11px] text-[#271a82]">Juan Yaya (Admin)</div>
-                    <div className="text-[9px] text-slate-500 font-mono">automatizaciones@</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEmail('andres.morales@tlm.net.co');
-                      setPassword('colab123');
-                    }}
-                    className="p-1.5 rounded-lg bg-white border border-indigo-200 hover:border-[#271a82] hover:bg-indigo-50/50 text-left transition cursor-pointer"
-                  >
-                    <div className="font-bold text-[11px] text-[#271a82]">Andrés Morales (Colab 1)</div>
-                    <div className="text-[9px] text-slate-500 font-mono">andres.morales@</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEmail('valentina.castro@tlm.net.co');
-                      setPassword('colab123');
-                    }}
-                    className="p-1.5 rounded-lg bg-white border border-indigo-200 hover:border-[#271a82] hover:bg-indigo-50/50 text-left transition cursor-pointer"
-                  >
-                    <div className="font-bold text-[11px] text-[#271a82]">Valentina Castro (Colab 2)</div>
-                    <div className="text-[9px] text-slate-500 font-mono">valentina.castro@</div>
-                  </button>
-                </div>
               </div>
             </form>
           )}

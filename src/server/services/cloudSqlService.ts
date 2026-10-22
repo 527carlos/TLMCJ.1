@@ -760,6 +760,67 @@ export class CloudSqlService {
       const iva = Number(data.iva || 0);
       const retencionValor = Number(data.retencion_valor || 0);
       const total = Number(data.total || (subtotal + iva - retencionValor));
+      const cufeHash = data.cufe_hash || `cufe-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+
+      // Check if factura already exists by CUFE
+      if (data.cufe_hash) {
+        const existing = await drizzleDb.select().from(schema.facturas)
+          .where(eq(schema.facturas.cufeHash, data.cufe_hash))
+          .limit(1);
+
+        if (existing.length > 0) {
+          const prev = existing[0];
+          const updated = await drizzleDb.update(schema.facturas).set({
+            idEmpresa: data.id_empresa || prev.idEmpresa || 1,
+            facturaNum: data.factura_num || prev.facturaNum,
+            proveedor: data.proveedor || prev.proveedor,
+            nitTercero: data.nit_tercero || prev.nitTercero,
+            fecha: data.fecha || prev.fecha,
+            fechaVencimiento: data.fecha_vencimiento || prev.fechaVencimiento,
+            tipoComprobante: data.tipo_comprobante || prev.tipoComprobante,
+            descripcionItem: data.descripcion_item || prev.descripcionItem,
+            cantidad: String(data.cantidad || prev.cantidad || 1),
+            valorUnitario: String(data.valor_unitario || prev.valorUnitario || subtotal),
+            subtotal: String(subtotal),
+            iva: String(iva),
+            retencionPorc: String(data.retencion_porc || 0),
+            retencionValor: String(retencionValor),
+            total: String(total),
+            casilla350: data.casilla_350 || prev.casilla350 || 83,
+            formaPago: data.forma_pago || prev.formaPago || 'Crédito',
+            medioPago: data.medio_pago || prev.medioPago || 'Transferencia Débito',
+            cuentaGasto: data.cuenta_gasto || prev.cuentaGasto || '513535',
+            estadoRevision: data.estado_revision || prev.estadoRevision || 'AUDITADA',
+          }).where(eq(schema.facturas.id, prev.id)).returning();
+
+          const u = updated[0];
+          return {
+            id_factura: u.id,
+            id_empresa: u.idEmpresa || 1,
+            factura_num: u.facturaNum,
+            proveedor: u.proveedor,
+            nit_tercero: u.nitTercero,
+            fecha: u.fecha,
+            fecha_vencimiento: u.fechaVencimiento || undefined,
+            tipo_comprobante: u.tipoComprobante || 'Factura Electrónica',
+            descripcion_item: u.descripcionItem,
+            cantidad: Number(u.cantidad || 1),
+            valor_unitario: Number(u.valorUnitario || 0),
+            subtotal: Number(u.subtotal || 0),
+            iva: Number(u.iva || 0),
+            total: Number(u.total || 0),
+            retencion_porc: Number(u.retencionPorc || 0),
+            retencion_valor: Number(u.retencionValor || 0),
+            casilla_350: u.casilla350 || 83,
+            forma_pago: u.formaPago || 'Crédito',
+            medio_pago: u.medioPago || 'Transferencia Débito',
+            cuenta_gasto: u.cuentaGasto || '513535',
+            cufe_hash: u.cufeHash || '',
+            estado_revision: (u.estadoRevision as any) || 'AUDITADA',
+            fecha_cargue: u.fechaCargue || new Date().toISOString(),
+          };
+        }
+      }
 
       const inserted = await drizzleDb.insert(schema.facturas).values({
         idEmpresa: data.id_empresa || 1,
@@ -777,8 +838,8 @@ export class CloudSqlService {
         retencionPorc: String(data.retencion_porc || 0),
         retencionValor: String(retencionValor),
         total: String(total),
-        estadoRevision: data.estado_revision || 'APROBADA',
-        cufeHash: data.cufe_hash || `cufe-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+        estadoRevision: data.estado_revision || 'AUDITADA',
+        cufeHash,
         casilla350: data.casilla_350 || 83,
         formaPago: data.forma_pago || 'Crédito',
         medioPago: data.medio_pago || 'Transferencia Débito',
@@ -809,7 +870,7 @@ export class CloudSqlService {
         medio_pago: r.medioPago || 'Transferencia Débito',
         cuenta_gasto: r.cuentaGasto || '513535',
         cufe_hash: r.cufeHash || '',
-        estado_revision: (r.estadoRevision as any) || 'APROBADA',
+        estado_revision: (r.estadoRevision as any) || 'AUDITADA',
         fecha_cargue: r.fechaCargue || new Date().toISOString(),
       };
     } catch (error) {

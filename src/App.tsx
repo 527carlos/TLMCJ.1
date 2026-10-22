@@ -262,10 +262,14 @@ export default function App() {
         body: formData
       });
       const data = await res.json();
-      showToast(`¡Se procesaron ${data.archivos_procesados} archivos XML UBL exitosamente!`);
+      if (data.facturas_creadas > 0) {
+        showToast(`¡Se procesaron ${data.archivos_procesados} archivo(s) y se sincronizaron ${data.facturas_creadas} facturas en la base de datos!`);
+      } else {
+        showToast(`Se procesaron ${data.archivos_procesados} archivo(s), pero no se detectaron nuevas facturas válidas.`, 'info');
+      }
       loadData();
     } catch (err) {
-      showToast('Error procesando archivos XML.', 'error');
+      showToast('Error procesando archivos XML / ZIP.', 'error');
     }
   };
 
