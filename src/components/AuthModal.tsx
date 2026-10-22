@@ -1,32 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Usuario } from '../types/index.ts';
-import { 
-  X, 
-  User, 
-  Lock, 
-  Mail, 
-  ShieldCheck, 
-  CheckCircle2, 
-  AlertCircle, 
-  LogOut, 
-  KeyRound, 
-  ArrowRight,
-  UserPlus, 
-  LogIn, 
-  Check,
-  Camera,
-  Upload,
-  Trash2,
-  Sparkles,
-  ShieldAlert,
-  Key,
-  RefreshCw,
-  Send,
-  Eye,
-  EyeOff,
-  Clock,
-  Shield
-} from 'lucide-react';
+import { X, User, Lock, Mail, ShieldCheck, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, LogOut, KeyRound, ArrowRight, UserPlus, LogIn, Check, Camera, Upload, Trash2, Sparkles, ShieldAlert, Key, RefreshCw, Send, Eye, EyeOff, Clock, Shield } from 'lucide-react';
 import { TlmLogo } from './TlmLogo.tsx';
 
 interface AuthModalProps {
