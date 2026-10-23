@@ -400,7 +400,7 @@ export default function App() {
       const res = await fetch('/api/v1/conciliacion/ejecutar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tolerance })
+        body: JSON.stringify({ tolerancia: tolerance })
       });
       const data = await res.json();
       setConciliacionSummary(data);
