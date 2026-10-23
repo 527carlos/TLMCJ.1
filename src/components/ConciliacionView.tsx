@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 import { ConciliacionSummary, MovimientoBancario, MovimientoLibro } from '../types/index.ts';
-import { 
-  Scale, 
-  ArrowRightLeft, 
-  CheckCircle2, 
-  AlertTriangle, 
-  FileText, 
-  Download, 
-  Sliders, 
+import {
+  Scale,
+  ArrowRightLeft,
+  CheckCircle2,
+  AlertTriangle,
+  FileText,
+  Download,
+  Sliders,
   Building,
-  RefreshCw
+  RefreshCw,
+  UploadCloud,
+  Loader2
 } from 'lucide-react';
 
 interface ConciliacionViewProps {
@@ -17,17 +19,39 @@ interface ConciliacionViewProps {
   onExecuteReconciliation: (tolerance: number) => void;
   onGenerateFlatFile: () => void;
   isRunning?: boolean;
+  onUploadExtracto?: (file: File, banco: string, idEmpresa: number) => Promise<{ movimientos_importados: number; mensaje: string }>;
+  activeEmpresaId?: number;
 }
 
 export const ConciliacionView: React.FC<ConciliacionViewProps> = ({
   summary,
   onExecuteReconciliation,
   onGenerateFlatFile,
-  isRunning = false
+  isRunning = false,
+  onUploadExtracto,
+  activeEmpresaId = 1
 }) => {
   const [bankSelect, setBankSelect] = useState('DAVIVIENDA');
   const [tolerance, setTolerance] = useState(0);
   const [activeTab, setActiveTab] = useState<'CRUCES' | 'PENDIENTES_BANCO' | 'PENDIENTES_LIBRO'>('CRUCES');
+  const [extractoUploading, setExtractoUploading] = useState(false);
+  const [extractoResult, setExtractoResult] = useState<string | null>(null);
+
+  const handleUploadExtracto = async (file: File) => {
+    if (!onUploadExtracto) return;
+    setExtractoUploading(true);
+    setExtractoResult(null);
+    try {
+      const result = await onUploadExtracto(file, bankSelect, activeEmpresaId);
+      setExtractoResult(result.mensaje);
+      setTimeout(() => setExtractoResult(null), 7000);
+    } catch {
+      setExtractoResult('Error procesando extracto bancario.');
+      setTimeout(() => setExtractoResult(null), 5000);
+    } finally {
+      setExtractoUploading(false);
+    }
+  };
 
   const formatCOP = (num: number) => {
     return new Intl.NumberFormat('es-CO', {
@@ -84,6 +108,26 @@ export const ConciliacionView: React.FC<ConciliacionViewProps> = ({
             />
           </div>
 
+          <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#0066da] border border-blue-200 font-bold text-xs transition active:scale-95 cursor-pointer ${extractoUploading ? 'opacity-70 pointer-events-none' : ''}`} title="Cargar extracto bancario CSV/TXT">
+            {extractoUploading ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /><span>Procesando...</span></>
+            ) : (
+              <><UploadCloud className="w-4 h-4" /><span>Cargar Extracto</span></>
+            )}
+            <input
+              type="file"
+              accept=".csv,.txt,.xls,.xlsx"
+              className="hidden"
+              disabled={extractoUploading}
+              onChange={(e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                  handleUploadExtracto(e.target.files[0]);
+                  e.target.value = '';
+                }
+              }}
+            />
+          </label>
+
           <button
             onClick={() => onExecuteReconciliation(tolerance)}
             disabled={isRunning}
@@ -94,6 +138,14 @@ export const ConciliacionView: React.FC<ConciliacionViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Extracto upload result banner */}
+      {extractoResult && (
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl px-5 py-3 flex items-center gap-3 text-xs font-semibold text-blue-800 animate-in fade-in">
+          <UploadCloud className="w-4 h-4 text-blue-600 shrink-0" />
+          <span>{extractoResult}</span>
+        </div>
+      )}
 
       {/* KPI Stats */}
       {summary && (

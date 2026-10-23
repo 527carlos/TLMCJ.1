@@ -422,6 +422,22 @@ export default function App() {
     }
   };
 
+  const handleUploadExtracto = async (file: File, banco: string, idEmpresa: number) => {
+    const formData = new FormData();
+    formData.append('extracto', file);
+    formData.append('banco', banco);
+    formData.append('id_empresa', idEmpresa.toString());
+    const res = await fetch('/api/v1/conciliacion/upload-extracto', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Error procesando extracto');
+    showToast(data.mensaje || `Extracto de ${banco} cargado: ${data.movimientos_importados} movimientos.`);
+    loadData();
+    return data;
+  };
+
   const handleApproveUser = async (id: number) => {
     try {
       setUsuarios(prev => prev.map(u => u.id_usuario === id ? { ...u, activo: true } : u));
@@ -699,6 +715,8 @@ export default function App() {
               onExecuteReconciliation={handleExecuteReconciliation}
               onGenerateFlatFile={handleGenerateFlatFile}
               isRunning={isConciliating}
+              onUploadExtracto={handleUploadExtracto}
+              activeEmpresaId={activeEmpresa?.id_empresa || 1}
             />
           )}
 

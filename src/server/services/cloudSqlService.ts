@@ -993,6 +993,29 @@ export class CloudSqlService {
     }
   }
 
+  public static async bulkCreateCuentasPuc(cuentas: Partial<CuentaPUC>[]): Promise<CuentaPUC[]> {
+    if (cuentas.length === 0) return [];
+    try {
+      const values = cuentas.map(c => ({
+        idEmpresa: c.id_empresa || 1,
+        cuenta: c.cuenta!,
+        nombre: c.nombre!,
+        naturaleza: (c.naturaleza as any) || 'DEBITO',
+      }));
+      const inserted = await drizzleDb.insert(schema.cuentasPuc).values(values).returning();
+      return inserted.map(r => ({
+        id_puc: r.id,
+        id_empresa: r.idEmpresa || 1,
+        cuenta: r.cuenta,
+        nombre: r.nombre,
+        naturaleza: (r.naturaleza as any) || 'DEBITO',
+      }));
+    } catch (error) {
+      console.error('[CloudSQL] Error bulkCreateCuentasPuc:', error);
+      throw error;
+    }
+  }
+
   public static async getBalanceTerceros(idEmpresa?: number): Promise<BalanceTercero[]> {
     try {
       const rows = await drizzleDb.select().from(schema.balanceTerceros).orderBy(schema.balanceTerceros.id);
