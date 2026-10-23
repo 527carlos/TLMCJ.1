@@ -1435,10 +1435,12 @@ router.post('/facturas/upload', upload.array('archivos'), async (req: Request, r
   const idEmpresa = parseInt(req.body.id_empresa || '1');
   const files = (req.files as Express.Multer.File[]) || [];
   const parsedFacturas: Partial<Factura>[] = [];
+  let archivosXmlExtraidos = 0;
 
   for (const file of files) {
-    const xmlText = file.buffer.toString('utf-8');
-    const parsedList = xmlParser.parseXmlUbl(xmlText, file.originalname);
+    // Use parseFileBuffer so ZIP archives are unpacked and all inner XMLs are processed
+    const parsedList = await xmlParser.parseFileBuffer(file.buffer, file.originalname);
+    archivosXmlExtraidos += parsedList.length;
 
     for (const p of parsedList) {
       parsedFacturas.push({
@@ -1517,6 +1519,7 @@ router.post('/facturas/upload', upload.array('archivos'), async (req: Request, r
   res.json({
     status: 'success',
     archivos_procesados: files.length,
+    xmls_extraidos: archivosXmlExtraidos,
     facturas_creadas: processedFacturas.length,
     facturas: processedFacturas
   });

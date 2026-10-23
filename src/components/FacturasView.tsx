@@ -3,7 +3,6 @@ import { Factura, CuentaPUC } from '../types/index.ts';
 import { 
   UploadCloud, 
   Search, 
-  Filter, 
   FileCheck2, 
   Trash2, 
   Send, 
@@ -13,8 +12,10 @@ import {
   CheckSquare, 
   Square,
   ShieldCheck,
-  Building,
-  FolderDown
+  FolderDown,
+  Archive,
+  Loader2,
+  FileX
 } from 'lucide-react';
 
 interface FacturasViewProps {
@@ -29,6 +30,7 @@ interface FacturasViewProps {
   onInspectCufe: (factura: Factura) => void;
   onOpenSiigoPush: (facturas: Factura[]) => void;
   isUploading?: boolean;
+  onUploadXmlWithProgress?: (files: FileList) => Promise<{ archivos_procesados: number; xmls_extraidos: number; facturas_creadas: number }>;
 }
 
 export const FacturasView: React.FC<FacturasViewProps> = ({
@@ -42,11 +44,31 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
   onBulkDelete,
   onInspectCufe,
   onOpenSiigoPush,
-  isUploading = false
+  isUploading = false,
+  onUploadXmlWithProgress
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('TODOS');
   const [casillaFilter, setCasillaFilter] = useState('TODOS');
+  const [uploadingState, setUploadingState] = useState<{ active: boolean; fileName: string; result: { archivos_procesados: number; xmls_extraidos: number; facturas_creadas: number } | null }>({ active: false, fileName: '', result: null });
+
+  const handleUploadFiles = async (files: FileList) => {
+    if (!files || files.length === 0) return;
+    const names = Array.from(files).map(f => f.name).join(', ');
+    setUploadingState({ active: true, fileName: names, result: null });
+    if (onUploadXmlWithProgress) {
+      try {
+        const result = await onUploadXmlWithProgress(files);
+        setUploadingState({ active: false, fileName: names, result });
+        setTimeout(() => setUploadingState(s => ({ ...s, result: null })), 7000);
+      } catch {
+        setUploadingState({ active: false, fileName: names, result: null });
+      }
+    } else {
+      onUploadXml(files);
+      setUploadingState({ active: false, fileName: names, result: null });
+    }
+  };
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
   const formatCOP = (num: number) => {
@@ -108,21 +130,26 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
       <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h3 className="font-bold text-slate-800 text-lg">Ingesta Masiva UBL 2.1 & Auditoría</h3>
-          <p className="text-xs text-slate-500">Arrastre facturas electrónicas XML de la DIAN o pruebe con el generador de muestras</p>
+          <p className="text-xs text-slate-500">Cargue facturas XML individuales o archivos ZIP con múltiples XMLs — la fecha se extrae del documento DIAN</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#271a82] hover:bg-[#1c1343] text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer">
-            <UploadCloud className="w-4 h-4 text-[#fa9d1c]" />
-            <span>Cargar XMLs / ZIPs DIAN</span>
+          <label className={`flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#271a82] hover:bg-[#1c1343] text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer ${uploadingState.active ? 'opacity-70 pointer-events-none' : ''}`}>
+            {uploadingState.active ? (
+              <><Loader2 className="w-4 h-4 text-[#fa9d1c] animate-spin" /><span>Procesando...</span></>
+            ) : (
+              <><UploadCloud className="w-4 h-4 text-[#fa9d1c]" /><span>Cargar XMLs / ZIPs DIAN</span></>
+            )}
             <input
               type="file"
               multiple
               accept=".xml,.zip,application/zip,text/xml,application/xml"
               className="hidden"
+              disabled={uploadingState.active}
               onChange={(e) => {
                 if (e.target.files && e.target.files.length > 0) {
-                  onUploadXml(e.target.files);
+                  handleUploadFiles(e.target.files);
+                  e.target.value = '';
                 }
               }}
             />
@@ -156,6 +183,20 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
           </a>
         </div>
       </div>
+
+      {/* Upload result banner */}
+      {uploadingState.result && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl px-5 py-3 flex items-center gap-3 text-xs font-semibold text-emerald-800 animate-in fade-in">
+          <FileCheck2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>
+            {uploadingState.result.archivos_procesados} archivo(s) procesado(s)
+            {uploadingState.result.xmls_extraidos > uploadingState.result.archivos_procesados && (
+              <> &mdash; <Archive className="w-3.5 h-3.5 inline mx-0.5 relative top-[-1px]" />{uploadingState.result.xmls_extraidos} XMLs extra&iacute;dos del ZIP</>
+            )}
+            {' \u2014 '}{uploadingState.result.facturas_creadas} factura(s) registrada(s) con fecha del documento DIAN.
+          </span>
+        </div>
+      )}
 
       {/* Filter and Batch Toolbar */}
       <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs space-y-3">
