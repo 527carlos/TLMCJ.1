@@ -1,20 +1,21 @@
 import React, { useState } from 'react';
 import { Factura, CuentaPUC } from '../types/index.ts';
-import { 
-  UploadCloud, 
-  Search, 
-  FileCheck2, 
-  Trash2, 
-  Send, 
-  FileSpreadsheet, 
-  Eye, 
-  Sparkles, 
-  CheckSquare, 
+import {
+  UploadCloud,
+  Search,
+  FileCheck2,
+  Trash2,
+  Send,
+  FileSpreadsheet,
+  Eye,
+  Sparkles,
+  CheckSquare,
   Square,
   ShieldCheck,
   FolderDown,
   Archive,
-  Loader2
+  Loader2,
+  FileDown
 } from 'lucide-react';
 
 interface FacturasViewProps {
@@ -180,6 +181,16 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
             <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
             <span>Exportar a Excel (.xlsx)</span>
           </a>
+
+          <a
+            href="/api/v1/facturas/exportar-pdf"
+            download="facturas_tlm.zip"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-300 font-bold text-xs transition active:scale-95 cursor-pointer shadow-2xs"
+            title="Descargar todas las facturas en PDF renombradas por número y proveedor"
+          >
+            <FileDown className="w-4 h-4 text-purple-600" />
+            <span>Descargar PDFs</span>
+          </a>
         </div>
       </div>
 
@@ -277,6 +288,16 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
                 <Trash2 className="w-3.5 h-3.5" />
                 Eliminar
               </button>
+
+              <a
+                href={`/api/v1/facturas/exportar-pdf${selectedIds.length > 0 ? `?ids=${selectedIds.join(',')}` : ''}`}
+                download="facturas_tlm.zip"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-100 text-purple-700 text-xs font-semibold hover:bg-purple-200 transition active:scale-95 cursor-pointer"
+                title="Descargar facturas seleccionadas en PDF renombradas por número y proveedor"
+              >
+                <FileDown className="w-3.5 h-3.5" />
+                Descargar PDFs ({selectedIds.length})
+              </a>
             </div>
           </div>
         )}
@@ -301,7 +322,7 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
                 <th className="py-3 px-3">Fecha</th>
                 <th className="py-3 px-3">Proveedor / NIT</th>
                 <th className="py-3 px-3">Subtotal & IVA</th>
-                <th className="py-3 px-3">Retención F350</th>
+                <th className="py-3 px-3">Retenciones (Fte / ICA / IVA)</th>
                 <th className="py-3 px-3">Cuenta PUC</th>
                 <th className="py-3 px-3">Estado</th>
                 <th className="py-3 px-3 text-right">Acciones</th>
@@ -370,8 +391,22 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
                           </select>
                         </div>
                         <div className="text-[11px] font-bold text-amber-700 mt-0.5">
-                          -{formatCOP(f.retencion_valor)}
+                          Fte: -{formatCOP(f.retencion_valor)}
                         </div>
+                        {f.reteica_tarifa ? (
+                          <div className="text-[10px] font-semibold text-orange-700 mt-0.5">
+                            ICA: -{formatCOP((f.subtotal * f.reteica_tarifa) / 1000)} ({f.reteica_tarifa}‰)
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-slate-300 mt-0.5">ICA: —</div>
+                        )}
+                        {f.reteiva_porc ? (
+                          <div className="text-[10px] font-semibold text-purple-700 mt-0.5">
+                            IVA: -{formatCOP((f.iva * f.reteiva_porc) / 100)} ({f.reteiva_porc}%)
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-slate-300 mt-0.5">IVA: —</div>
+                        )}
                       </td>
                       <td className="py-3 px-3">
                         <select

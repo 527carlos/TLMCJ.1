@@ -105,7 +105,11 @@ export class SiigoService {
             due_date: factura.fecha_vencimiento || factura.fecha
           }
         ],
-        retentions: factura.retencion_valor > 0 ? [{ id: 201 }] : []
+        retentions: [
+          ...(factura.retencion_valor > 0 ? [{ id: 201 }] : []),
+          ...(factura.reteica_tarifa ? [{ id: 301 }] : []),
+          ...(factura.reteiva_porc ? [{ id: 401 }] : [])
+        ]
       };
 
       // Generated Siigo Purchase Voucher ID

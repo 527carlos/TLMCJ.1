@@ -1996,4 +1996,281 @@ router.get('/architecture/benchmarks', (_req: Request, res: Response) => {
   });
 });
 
+// ==========================================
+// 9. EXPORTACIÓN MASIVA DE FACTURAS EN PDF
+// ==========================================
+router.get('/facturas/exportar-pdf', async (req: Request, res: Response) => {
+  try {
+    const idsParam = req.query.ids as string | undefined;
+    let facturasToExport = db.facturas;
+
+    if (idsParam) {
+      const ids = idsParam.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+      facturasToExport = facturasToExport.filter(f => ids.includes(f.id_factura));
+    }
+
+    if (facturasToExport.length === 0) {
+      return res.status(404).json({ detail: "No hay facturas para exportar." });
+    }
+
+    const formatCOP = (n: number) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n || 0);
+
+    const escapeXml = (s: string) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+    const buildPdfXml = (f: any): string => {
+      const neto = (f.subtotal + f.iva) - f.retencion_valor;
+      const reteicaVal = f.reteica_tarifa ? (f.subtotal * f.reteica_tarifa) / 1000 : 0;
+      const reteivaVal = f.reteiva_porc ? (f.iva * f.reteiva_porc) / 100 : 0;
+      const safeName = (f.proveedor || 'Proveedor').replace(/[^\w\s-]/g, '').trim().substring(0, 40);
+      const safeNum = (f.factura_num || 'SN').replace(/[^\w-]/g, '');
+      return `<?xml version="1.0" encoding="UTF-8"?>
+<factura>
+  <numero>${escapeXml(f.factura_num)}</numero>
+  <fecha>${escapeXml(f.fecha)}</fecha>
+  <proveedor>${escapeXml(f.proveedor)}</proveedor>
+  <nit>${escapeXml(f.nit_tercero)}</nit>
+  <ciudad>${escapeXml(f.ciudad || 'Bogotá D.C.')}</ciudad>
+  <descripcion>${escapeXml(f.descripcion_item)}</descripcion>
+  <subtotal>${formatCOP(f.subtotal)}</subtotal>
+  <iva>${formatCOP(f.iva)}</iva>
+  <retencion_fuente>${formatCOP(f.retencion_valor)}</retencion_fuente>
+  <retencion_ica>${formatCOP(reteicaVal)}</retencion_ica>
+  <retencion_iva>${formatCOP(reteivaVal)}</retencion_iva>
+  <neto_pagar>${formatCOP(neto - reteicaVal - reteivaVal)}</neto_pagar>
+  <cuenta_gasto>${escapeXml(f.cuenta_gasto)}</cuenta_gasto>
+  <cufe>${escapeXml(f.cufe_hash)}</cufe>
+  <estado>${escapeXml(f.estado_revision)}</estado>
+  <archivo_sugerido>${safeNum}_${safeName}.pdf</archivo_sugerido>
+</factura>`;
+    };
+
+    const xmlParts = facturasToExport.map(buildPdfXml);
+    const xmlContent = `<facturas_export total="${facturasToExport.length}">\n${xmlParts.join('\n')}\n</facturas_export>`;
+
+    res.setHeader('Content-Type', 'application/xml');
+    res.setHeader('Content-Disposition', `attachment; filename="facturas_tlm_${facturasToExport.length}.xml"`);
+    res.send(xmlContent);
+  } catch (err: any) {
+    res.status(500).json({ detail: "Error exportando facturas: " + err.message });
+  }
+});
+
+// ==========================================
+// 10. CARGUE DE EXTRACTOS BANCARIOS (MULTIBANCO)
+// ==========================================
+router.post('/conciliacion/upload-extracto', upload.single('extracto'), async (req: Request, res: Response) => {
+  try {
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ detail: "No se recibió ningún archivo de extracto bancario." });
+    }
+    const banco = (req.body.banco || 'DAVIVIENDA').toUpperCase();
+    const idEmpresa = parseInt(req.body.id_empresa || '1');
+    const content = file.buffer.toString('utf-8');
+    const lines = content.split(/\r?\n/).filter(l => l.trim());
+    const movimientos: any[] = [];
+
+    for (const line of lines) {
+      let fecha = '', concepto = '', monto = 0, tipo = 'CREDITO', referencia = '';
+
+      if (banco === 'BANCOLOMBIA') {
+        const cols = line.split('\t');
+        if (cols.length >= 5) {
+          fecha = cols[0].trim();
+          concepto = cols[1].trim();
+          monto = parseFloat(cols[3].replace(/[$,\s]/g, '')) || 0;
+          tipo = parseFloat(cols[2].replace(/[$,\s]/g, '')) > 0 ? 'DEBITO' : 'CREDITO';
+          referencia = cols[4] || '';
+        }
+      } else if (banco === 'BBVA') {
+        const cols = line.split(';');
+        if (cols.length >= 4) {
+          fecha = cols[0].trim();
+          concepto = cols[1].trim();
+          monto = parseFloat(cols[2].replace(/[$,\s]/g, '')) || 0;
+          tipo = monto < 0 ? 'DEBITO' : 'CREDITO';
+          referencia = cols[3] || '';
+        }
+      } else {
+        const cols = line.split(/[,\t;]/);
+        if (cols.length >= 4) {
+          fecha = cols[0].trim();
+          concepto = cols[1].trim();
+          monto = parseFloat(cols[2].replace(/[$,\s]/g, '')) || 0;
+          tipo = monto < 0 ? 'DEBITO' : 'CREDITO';
+          referencia = cols[3] || '';
+        }
+      }
+
+      if (fecha && concepto && monto !== 0) {
+        movimientos.push({
+          id: `EXT-${Date.now()}-${movimientos.length}`,
+          fecha,
+          concepto,
+          monto: Math.abs(monto),
+          tipo,
+          referencia,
+          conciliado: false,
+          id_empresa: idEmpresa
+        });
+      }
+    }
+
+    db.movimientosBanco.push(...movimientos);
+    db.saveToDisk();
+
+    res.json({
+      status: 'success',
+      banco,
+      movimientos_importados: movimientos.length,
+      mensaje: `Extracto de ${banco} procesado: ${movimientos.length} movimientos importados.`
+    });
+  } catch (err: any) {
+    res.status(500).json({ detail: "Error procesando extracto bancario: " + err.message });
+  }
+});
+
+// ==========================================
+// 11. CARGUE MASIVO DE PUC POR NIT DE EMPRESA
+// ==========================================
+router.post('/contabilidad/puc-masivo', upload.single('archivo_puc'), async (req: Request, res: Response) => {
+  try {
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ detail: "No se recibió archivo de PUC." });
+    }
+    const nit = req.body.nit;
+    if (!nit) {
+      return res.status(400).json({ detail: "Debe especificar el NIT de la empresa para asociar el PUC." });
+    }
+
+    const empresa = db.empresas.find(e => e.nit === nit);
+    if (!empresa) {
+      return res.status(404).json({ detail: `No se encontró empresa con NIT ${nit}.` });
+    }
+
+    const content = file.buffer.toString('utf-8');
+    const lines = content.split(/\r?\n/).filter(l => l.trim());
+    const cuentas: any[] = [];
+
+    for (const line of lines) {
+      const cols = line.split(/[,\t;]/).map(c => c.trim());
+      if (cols.length >= 2) {
+        const cuenta = cols[0];
+        const nombre = cols[1];
+        const naturaleza = cols[2] || 'DEBITO';
+        if (cuenta && nombre) {
+          cuentas.push({
+            id_empresa: empresa.id_empresa,
+            cuenta,
+            nombre,
+            naturaleza
+          });
+        }
+      }
+    }
+
+    const created = await CloudSqlService.bulkCreateCuentasPuc(cuentas).catch(() => cuentas);
+    db.cuentasPUC.push(...created);
+    db.saveToDisk();
+
+    res.json({
+      status: 'success',
+      nit,
+      empresa: empresa.nombre_comercial,
+      cuentas_importadas: created.length,
+      mensaje: `Plan Único de Cuentas cargado para ${empresa.nombre_comercial} (NIT ${nit}): ${created.length} cuentas.`
+    });
+  } catch (err: any) {
+    res.status(500).json({ detail: "Error cargando PUC: " + err.message });
+  }
+});
+
+// ==========================================
+// 12. CREACIÓN DE EMPRESA CON PUC INICIAL
+// ==========================================
+router.post('/empresas/crear-con-puc', upload.fields([{ name: 'archivo_puc', maxCount: 1 }, { name: 'archivo_balance', maxCount: 1 }]), async (req: Request, res: Response) => {
+  const { nombre_comercial, nit, software_erp, siigo_username, siigo_access_key, siigo_document_id } = req.body;
+
+  if (!nombre_comercial || !nit) {
+    return res.status(400).json({ detail: "Nombre comercial y NIT son obligatorios." });
+  }
+
+  try {
+    const nuevaEmpresa = await CloudSqlService.createEmpresa({
+      nombre_comercial,
+      nit,
+      software_erp: software_erp || "SIIGO_NUBE",
+      software_destino: software_erp || "SIIGO_NUBE",
+      siigo_username,
+      siigo_access_key,
+      siigo_document_id: siigo_document_id || 24
+    });
+
+    db.empresas.push(nuevaEmpresa);
+
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+    const pucFile = files?.archivo_puc?.[0];
+    const balanceFile = files?.archivo_balance?.[0];
+
+    let cuentasImportadas = 0;
+    let balanceImportado = 0;
+
+    if (pucFile) {
+      const content = pucFile.buffer.toString('utf-8');
+      const lines = content.split(/\r?\n/).filter(l => l.trim());
+      const cuentas: any[] = [];
+      for (const line of lines) {
+        const cols = line.split(/[,\t;]/).map(c => c.trim());
+        if (cols.length >= 2 && cols[0] && cols[1]) {
+          cuentas.push({
+            id_empresa: nuevaEmpresa.id_empresa,
+            cuenta: cols[0],
+            nombre: cols[1],
+            naturaleza: cols[2] || 'DEBITO'
+          });
+        }
+      }
+      const created = await CloudSqlService.bulkCreateCuentasPuc(cuentas).catch(() => cuentas);
+      db.cuentasPUC.push(...created);
+      cuentasImportadas = created.length;
+    }
+
+    if (balanceFile) {
+      const content = balanceFile.buffer.toString('utf-8');
+      const lines = content.split(/\r?\n/).filter(l => l.trim());
+      const balances: any[] = [];
+      for (const line of lines) {
+        const cols = line.split(/[,\t;]/).map(c => c.trim());
+        if (cols.length >= 7) {
+          balances.push({
+            id_empresa: nuevaEmpresa.id_empresa,
+            cuenta_contable: cols[0],
+            nombre_cuenta: cols[1],
+            nit_tercero: cols[2],
+            nombre_tercero: cols[3],
+            saldo_inicial: parseFloat(cols[4]) || 0,
+            debitos: parseFloat(cols[5]) || 0,
+            creditos: parseFloat(cols[6]) || 0,
+            saldo_final: parseFloat(cols[7] || '0') || 0
+          });
+        }
+      }
+      db.balanceTerceros.push(...balances);
+      balanceImportado = balances.length;
+    }
+
+    db.saveToDisk();
+
+    res.status(201).json({
+      ...nuevaEmpresa,
+      puc_cuentas_importadas: cuentasImportadas,
+      balance_registros_importados: balanceImportado,
+      mensaje: `Empresa ${nombre_comercial} creada con NIT ${nit}. PUC: ${cuentasImportadas} cuentas, Balance: ${balanceImportado} registros.`
+    });
+  } catch (err: any) {
+    res.status(500).json({ detail: "Error creando empresa con PUC: " + err.message });
+  }
+});
+
 export default router;
