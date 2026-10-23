@@ -14,8 +14,7 @@ import {
   ShieldCheck,
   FolderDown,
   Archive,
-  Loader2,
-  FileX
+  Loader2
 } from 'lucide-react';
 
 interface FacturasViewProps {

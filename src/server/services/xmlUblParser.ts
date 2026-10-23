@@ -136,7 +136,7 @@ export class XmlUblParserService {
       const dateMatch = 
         xmlContent.match(/<cbc:IssueDate[^>]*>([^<]+)<\/cbc:IssueDate>/i) ||
         xmlContent.match(/<IssueDate[^>]*>([^<]+)<\/IssueDate>/i);
-      const fecha = dateMatch ? dateMatch[1].trim() : new Date().toISOString().split('T')[0];
+      const fecha = dateMatch ? dateMatch[1].trim() : 'SIN_FECHA';
 
       // Due Date
       const dueDateMatch = 

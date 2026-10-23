@@ -275,7 +275,7 @@ export default function App() {
   }, [activeEmpresa?.id_empresa, currentUser?.id_usuario]);
 
   // Actions
-  const handleUploadXml = async (files: FileList) => {
+  const handleUploadXml = async (files: FileList): Promise<{ archivos_procesados: number; xmls_extraidos: number; facturas_creadas: number }> => {
     const formData = new FormData();
     formData.append('id_empresa', (activeEmpresa?.id_empresa || 1).toString());
     for (let i = 0; i < files.length; i++) {
@@ -288,14 +288,21 @@ export default function App() {
         body: formData
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Error procesando los archivos.');
       if (data.facturas_creadas > 0) {
         showToast(`¡Se procesaron ${data.archivos_procesados} archivo(s) y se sincronizaron ${data.facturas_creadas} facturas en la base de datos!`);
       } else {
         showToast(`Se procesaron ${data.archivos_procesados} archivo(s), pero no se detectaron nuevas facturas válidas.`, 'info');
       }
-      loadData();
+      await loadData();
+      return {
+        archivos_procesados: Number(data.archivos_procesados || files.length),
+        xmls_extraidos: Number(data.xmls_extraidos || data.facturas_creadas || 0),
+        facturas_creadas: Number(data.facturas_creadas || 0)
+      };
     } catch (err) {
       showToast('Error procesando archivos XML / ZIP.', 'error');
+      throw err;
     }
   };
 
@@ -668,6 +675,7 @@ export default function App() {
               facturas={facturas}
               cuentasPUC={cuentasPUC}
               onUploadXml={handleUploadXml}
+              onUploadXmlWithProgress={handleUploadXml}
               onSeedDemo={handleSeedDemo}
               onImportFromDrive={handleImportFromGoogleDrive}
               onUpdateFactura={handleUpdateFactura}
