@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Factura, CuentaPUC } from '../types/index.ts';
+import { Factura, CuentaPUC, Empresa } from '../types/index.ts';
 import {
   UploadCloud,
   Search,
@@ -21,12 +21,14 @@ import {
 interface FacturasViewProps {
   facturas: Factura[];
   cuentasPUC: CuentaPUC[];
+  activeEmpresa?: Empresa | null;
   onUploadXml: (files: FileList) => void;
   onSeedDemo: () => void;
   onImportFromDrive?: () => void;
   onUpdateFactura: (id: number, field: string, value: any) => void;
   onDeleteFactura: (id: number) => void;
   onBulkDelete: (ids: number[]) => void;
+  onClearAll?: () => void;
   onInspectCufe: (factura: Factura) => void;
   onOpenSiigoPush: (facturas: Factura[]) => void;
   isUploading?: boolean;
@@ -36,12 +38,14 @@ interface FacturasViewProps {
 export const FacturasView: React.FC<FacturasViewProps> = ({
   facturas,
   cuentasPUC,
+  activeEmpresa,
   onUploadXml,
   onSeedDemo,
   onImportFromDrive,
   onUpdateFactura,
   onDeleteFactura,
   onBulkDelete,
+  onClearAll,
   onInspectCufe,
   onOpenSiigoPush,
   isUploading = false,

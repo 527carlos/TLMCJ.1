@@ -1,16 +1,34 @@
-import React, { useState } from 'react';
-import { CuentaPUC, BalanceTercero } from '../types/index.ts';
-import { BookOpen, Search, Layers, UserCheck, ArrowUpDown } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { CuentaPUC, BalanceTercero, Empresa } from '../types/index.ts';
+import { BookOpen, Search, Layers, UserCheck, ArrowUpDown, UploadCloud, CheckCircle2, Loader2 } from 'lucide-react';
 
 interface CerebroContableViewProps {
   cuentasPUC: CuentaPUC[];
   balanceTerceros: BalanceTercero[];
+  activeEmpresa?: Empresa | null;
+  onRefreshData?: () => void;
+  onShowToast?: (msg: string, type?: 'success' | 'info' | 'error') => void;
 }
 
-export const CerebroContableView: React.FC<CerebroContableViewProps> = ({ cuentasPUC, balanceTerceros }) => {
+export const CerebroContableView: React.FC<CerebroContableViewProps> = ({
+  cuentasPUC,
+  balanceTerceros,
+  activeEmpresa,
+  onRefreshData,
+  onShowToast
+}) => {
   const [activeTab, setActiveTab] = useState<'PUC' | 'BALANCE'>('PUC');
   const [searchPuc, setSearchPuc] = useState('');
   const [searchBalance, setSearchBalance] = useState('');
+
+  const [pucFile, setPucFile] = useState<File | null>(null);
+  const [balanceFile, setBalanceFile] = useState<File | null>(null);
+
+  const [isUploadingPuc, setIsUploadingPuc] = useState(false);
+  const [isUploadingBalance, setIsUploadingBalance] = useState(false);
+
+  const pucInputRef = useRef<HTMLInputElement>(null);
+  const balanceInputRef = useRef<HTMLInputElement>(null);
 
   const formatCOP = (num: number) => {
     return new Intl.NumberFormat('es-CO', {
@@ -31,6 +49,64 @@ export const CerebroContableView: React.FC<CerebroContableViewProps> = ({ cuenta
     b.nombre_tercero.toLowerCase().includes(searchBalance.toLowerCase())
   );
 
+  const handleSincronizarPuc = async () => {
+    if (!pucFile) {
+      alert('Por favor seleccione un archivo de PUC (.xlsx, .xls o .csv)');
+      return;
+    }
+
+    setIsUploadingPuc(true);
+    const formData = new FormData();
+    formData.append('archivo_puc', pucFile);
+    formData.append('nit', activeEmpresa?.nit || '900543210-9');
+
+    try {
+      const res = await fetch('/api/v1/contabilidad/puc-masivo', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Error cargando PUC');
+      onShowToast?.(data.mensaje || 'Plan Único de Cuentas sincronizado con éxito.', 'success');
+      setPucFile(null);
+      if (pucInputRef.current) pucInputRef.current.value = '';
+      onRefreshData?.();
+    } catch (err: any) {
+      alert(err.message || 'Error cargando PUC');
+    } finally {
+      setIsUploadingPuc(false);
+    }
+  };
+
+  const handleSincronizarBalance = async () => {
+    if (!balanceFile) {
+      alert('Por favor seleccione un archivo de Balance de Prueba (.xlsx, .xls o .csv)');
+      return;
+    }
+
+    setIsUploadingBalance(true);
+    const formData = new FormData();
+    formData.append('archivo_balance', balanceFile);
+    formData.append('id_empresa', (activeEmpresa?.id_empresa || 1).toString());
+
+    try {
+      const res = await fetch('/api/v1/contabilidad/balance-masivo', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Error cargando Balance');
+      onShowToast?.(data.mensaje || 'Balance de prueba sincronizado con éxito.', 'success');
+      setBalanceFile(null);
+      if (balanceInputRef.current) balanceInputRef.current.value = '';
+      onRefreshData?.();
+    } catch (err: any) {
+      alert(err.message || 'Error cargando Balance');
+    } finally {
+      setIsUploadingBalance(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -42,8 +118,8 @@ export const CerebroContableView: React.FC<CerebroContableViewProps> = ({ cuenta
             </span>
             <span className="text-xs text-slate-400 font-medium">Catálogo Jerárquico & Balances</span>
           </div>
-          <h3 className="text-xl font-bold text-slate-800 tracking-tight">Catálogo PUC & Balance de Terceros</h3>
-          <p className="text-xs text-slate-500">Mapeo canónico de cuentas para comprobantes en Siigo Nube y Siigo Pyme</p>
+          <h3 className="text-xl font-bold text-slate-800 tracking-tight">Cerebro Contable (MSM)</h3>
+          <p className="text-xs text-slate-500">Cargue del Catálogo PUC y Saldos de Balance de Prueba</p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -66,6 +142,77 @@ export const CerebroContableView: React.FC<CerebroContableViewProps> = ({ cuenta
             }`}
           >
             Balance de Terceros ({balanceTerceros.length})
+          </button>
+        </div>
+      </div>
+
+      {/* TWO BIG CARDS FROM VIDEO (02:51 - 02:55) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Card 1: Cargar Catálogo PUC */}
+        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs flex flex-col justify-between space-y-4">
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                <BookOpen className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-800 text-sm">Cargar Catálogo PUC</h4>
+                <p className="text-[11px] text-slate-400">Soporta formato Excel (.xlsx) o archivo plano delimitado</p>
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <input
+                ref={pucInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={(e) => setPucFile(e.target.files?.[0] || null)}
+                className="w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer"
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={handleSincronizarPuc}
+            disabled={isUploadingPuc}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#1c1343] hover:bg-[#271a82] text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer disabled:opacity-50"
+          >
+            {isUploadingPuc ? <Loader2 className="w-4 h-4 animate-spin text-[#fa9d1c]" /> : <UploadCloud className="w-4 h-4 text-[#fa9d1c]" />}
+            <span>Sincronizar Cuentas</span>
+          </button>
+        </div>
+
+        {/* Card 2: Cargar Balance de Prueba */}
+        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs flex flex-col justify-between space-y-4">
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+                <Layers className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-800 text-sm">Cargar Balance de Prueba</h4>
+                <p className="text-[11px] text-slate-400">Soporta balance de terceros con saldos iniciales y débitos/créditos</p>
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <input
+                ref={balanceInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={(e) => setBalanceFile(e.target.files?.[0] || null)}
+                className="w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer"
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={handleSincronizarBalance}
+            disabled={isUploadingBalance}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#1c1343] hover:bg-[#271a82] text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer disabled:opacity-50"
+          >
+            {isUploadingBalance ? <Loader2 className="w-4 h-4 animate-spin text-[#fa9d1c]" /> : <UploadCloud className="w-4 h-4 text-[#fa9d1c]" />}
+            <span>Sincronizar Saldos</span>
           </button>
         </div>
       </div>
@@ -95,39 +242,51 @@ export const CerebroContableView: React.FC<CerebroContableViewProps> = ({ cuenta
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredPuc.map(c => {
-                  const clase = c.cuenta.charAt(0);
-                  let tipoNombre = 'Activo';
-                  if (clase === '2') tipoNombre = 'Pasivo';
-                  if (clase === '3') tipoNombre = 'Patrimonio';
-                  if (clase === '4') tipoNombre = 'Ingresos';
-                  if (clase === '5') tipoNombre = 'Gastos Operacionales';
+                {filteredPuc.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-8 text-center text-slate-400">
+                      No se encontraron cuentas con el filtro ingresado.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredPuc.map(c => {
+                    const clase = c.cuenta.charAt(0);
+                    let tipoNombre = 'Activo';
+                    if (clase === '2') tipoNombre = 'Pasivo';
+                    if (clase === '3') tipoNombre = 'Patrimonio';
+                    if (clase === '4') tipoNombre = 'Ingresos';
+                    if (clase === '5') tipoNombre = 'Gastos Operacionales';
 
-                  return (
-                    <tr key={c.id_puc} className="hover:bg-slate-50/80 transition">
-                      <td className="py-3 px-4 font-mono font-bold text-[#271A82]">{c.cuenta}</td>
-                      <td className="py-3 px-4 font-semibold text-slate-800">{c.nombre}</td>
-                      <td className="py-3 px-4 text-center">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
-                          {tipoNombre}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        {clase === '5' ? (
-                          <span className="px-2 py-0.5 rounded bg-red-50 text-[#e64519] border border-red-200 font-bold text-[10px]">
-                            Causación ETL
+                    return (
+                      <tr key={c.id_puc} className="hover:bg-slate-50/80 transition">
+                        <td className="py-3 px-4 font-mono font-bold text-[#271A82]">{c.cuenta}</td>
+                        <td className="py-3 px-4 font-semibold text-slate-800">{c.nombre}</td>
+                        <td className="py-3 px-4 text-center">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
+                            {tipoNombre}
                           </span>
-                        ) : clase === '2' ? (
-                          <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-bold text-[10px]">
-                            Retención / Pasivo
-                          </span>
-                        ) : (
-                          <span className="text-slate-400 text-[10px]">General</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          {clase === '5' ? (
+                            <span className="px-2 py-0.5 rounded bg-red-50 text-[#e64519] border border-red-200 font-bold text-[10px]">
+                              Causación ETL
+                            </span>
+                          ) : clase === '2' ? (
+                            <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 font-bold text-[10px]">
+                              Pasivos / CXP
+                            </span>
+                          ) : clase === '1' ? (
+                            <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[10px]">
+                              Bancos & Activos
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-mono text-[10px]">Estándar</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -158,24 +317,30 @@ export const CerebroContableView: React.FC<CerebroContableViewProps> = ({ cuenta
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredBalance.map(b => (
-                  <tr key={b.id_balance} className="hover:bg-slate-50/80 transition">
-                    <td className="py-3 px-4">
-                      <span className="font-mono font-bold text-[#271A82] block">{b.cuenta_contable}</span>
-                      <span className="text-[11px] text-slate-400">{b.nombre_cuenta}</span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="font-semibold text-slate-800">{b.nombre_tercero}</div>
-                      <div className="text-[11px] text-slate-400 font-mono">NIT: {b.nit_tercero}</div>
-                    </td>
-                    <td className="py-3 px-4 text-right text-slate-600">{formatCOP(b.saldo_inicial)}</td>
-                    <td className="py-3 px-4 text-right font-medium text-emerald-700">{formatCOP(b.debitos)}</td>
-                    <td className="py-3 px-4 text-right font-medium text-amber-700">{formatCOP(b.creditos)}</td>
-                    <td className="py-3 px-4 text-right font-black text-slate-800 text-sm">
-                      {formatCOP(b.saldo_final)}
+                {filteredBalance.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-slate-400">
+                      No hay registros en el balance de prueba.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  filteredBalance.map(b => (
+                    <tr key={b.id_balance} className="hover:bg-slate-50/80 transition">
+                      <td className="py-3 px-4 font-mono font-bold text-slate-700">
+                        <div>{b.cuenta_contable}</div>
+                        <div className="text-[10px] text-slate-400 font-normal">{b.nombre_cuenta}</div>
+                      </td>
+                      <td className="py-3 px-4 font-semibold text-slate-800">
+                        <div>{b.nombre_tercero}</div>
+                        <div className="text-[10px] text-slate-400 font-mono">NIT: {b.nit_tercero}</div>
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono text-slate-600">{formatCOP(b.saldo_inicial)}</td>
+                      <td className="py-3 px-4 text-right font-mono text-emerald-700 font-semibold">{formatCOP(b.debitos)}</td>
+                      <td className="py-3 px-4 text-right font-mono text-red-700 font-semibold">{formatCOP(b.creditos)}</td>
+                      <td className="py-3 px-4 text-right font-mono font-black text-slate-800">{formatCOP(b.saldo_final)}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

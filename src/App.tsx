@@ -394,6 +394,20 @@ export default function App() {
     }
   };
 
+  const handleClearAllFacturas = async () => {
+    try {
+      const empId = activeEmpresa ? activeEmpresa.id_empresa : 1;
+      setFacturas(prev => prev.filter(f => f.id_empresa !== empId));
+      const res = await fetch(`/api/v1/facturas/limpiar-todo?id_empresa=${empId}`, { method: 'DELETE' });
+      const data = await res.json();
+      showToast(data.mensaje || 'Comprobantes eliminados.');
+      await loadData();
+    } catch (err) {
+      showToast('Error limpiando facturas.', 'error');
+      await loadData();
+    }
+  };
+
   const handleExecuteReconciliation = async (tolerance: number) => {
     setIsConciliating(true);
     try {
@@ -690,6 +704,7 @@ export default function App() {
             <FacturasView
               facturas={facturas}
               cuentasPUC={cuentasPUC}
+              activeEmpresa={activeEmpresa}
               onUploadXml={handleUploadXml}
               onUploadXmlWithProgress={handleUploadXml}
               onSeedDemo={handleSeedDemo}
@@ -697,6 +712,7 @@ export default function App() {
               onUpdateFactura={handleUpdateFactura}
               onDeleteFactura={handleDeleteFactura}
               onBulkDelete={handleBulkDelete}
+              onClearAll={handleClearAllFacturas}
               onInspectCufe={(f) => setSelectedCufeFactura(f)}
               onOpenSiigoPush={(facts) => setSiigoPushFacturas(facts)}
             />
@@ -717,6 +733,9 @@ export default function App() {
               isRunning={isConciliating}
               onUploadExtracto={handleUploadExtracto}
               activeEmpresaId={activeEmpresa?.id_empresa || 1}
+              cuentasPUC={cuentasPUC}
+              onRefreshData={loadData}
+              onShowToast={showToast}
             />
           )}
 
@@ -724,6 +743,9 @@ export default function App() {
             <CerebroContableView
               cuentasPUC={cuentasPUC}
               balanceTerceros={balanceTerceros}
+              activeEmpresa={activeEmpresa}
+              onRefreshData={loadData}
+              onShowToast={showToast}
             />
           )}
 

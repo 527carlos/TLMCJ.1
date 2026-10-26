@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ConciliacionSummary, MovimientoBancario, MovimientoLibro } from '../types/index.ts';
+import { ConciliacionSummary, MovimientoBancario, MovimientoLibro, CuentaPUC } from '../types/index.ts';
 import {
   Scale,
   ArrowRightLeft,
@@ -21,6 +21,9 @@ interface ConciliacionViewProps {
   isRunning?: boolean;
   onUploadExtracto?: (file: File, banco: string, idEmpresa: number) => Promise<{ movimientos_importados: number; mensaje: string }>;
   activeEmpresaId?: number;
+  cuentasPUC?: CuentaPUC[];
+  onRefreshData?: () => void;
+  onShowToast?: (msg: string, type?: 'success' | 'info' | 'error') => void;
 }
 
 export const ConciliacionView: React.FC<ConciliacionViewProps> = ({
@@ -29,7 +32,10 @@ export const ConciliacionView: React.FC<ConciliacionViewProps> = ({
   onGenerateFlatFile,
   isRunning = false,
   onUploadExtracto,
-  activeEmpresaId = 1
+  activeEmpresaId = 1,
+  cuentasPUC,
+  onRefreshData,
+  onShowToast
 }) => {
   const [bankSelect, setBankSelect] = useState('DAVIVIENDA');
   const [tolerance, setTolerance] = useState(0);
