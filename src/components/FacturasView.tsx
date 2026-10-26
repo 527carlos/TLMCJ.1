@@ -34,6 +34,7 @@ interface FacturasViewProps {
   onUpdateFactura: (id: number, field: string, value: any) => void;
   onDeleteFactura: (id: number) => void;
   onBulkDelete: (ids: number[]) => void;
+  onClearAll?: () => void;
   onInspectCufe: (factura: Factura) => void;
   onOpenSiigoPush: (facturas: Factura[]) => void;
   onRefresh?: () => void;
@@ -70,6 +71,7 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
   onUpdateFactura,
   onDeleteFactura,
   onBulkDelete,
+  onClearAll,
   onInspectCufe,
   onOpenSiigoPush,
   onRefresh,
