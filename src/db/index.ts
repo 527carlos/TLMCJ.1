@@ -116,10 +116,13 @@ export const createPoolFromConfig = (config: ActiveDatabaseConfig): Pool => {
       : undefined
   );
 
+  // PostgreSQL local o sin TLS (sslmode=disable, localhost o socket): no forzar SSL
+  const sinSsl = Boolean(effectiveConnStr && (/sslmode=disable/i.test(effectiveConnStr) || /@(localhost|127\.0\.0\.1)(:|\/)/i.test(effectiveConnStr)));
+
   const poolConfig: PoolConfig = effectiveConnStr
     ? {
         connectionString: effectiveConnStr,
-        ssl: { rejectUnauthorized: false },
+        ssl: sinSsl ? false : { rejectUnauthorized: false },
         max: 10,
         connectionTimeoutMillis: 8000,
       }

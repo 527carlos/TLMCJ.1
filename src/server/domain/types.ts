@@ -70,18 +70,45 @@ export interface Empresa {
 }
 
 export interface FacturaItem {
-  id?: string;
+  linea: number;
+  codigo?: string;
   descripcion_item: string;
+  unidad?: string;
   cantidad: number;
   valor_unitario: number;
+  descuento?: number;
   subtotal: number;
   iva: number;
-  cuenta_gasto: string;
-  casilla_350: number;
-  retencion_porc: number;
-  retencion_valor: number;
-  reteica_tarifa: number;
-  reteiva_porc: number;
+  iva_porc?: number;
+  inc?: number;
+  /** Cuenta contable propia de la línea (si se reclasifica individualmente) */
+  cuenta_contable?: string;
+}
+
+export interface ParteFactura {
+  nit: string;
+  dv?: string;
+  tipo_documento?: string;
+  razon_social: string;
+  nombre_comercial?: string;
+  tipo_contribuyente?: string;
+  regimen_fiscal?: string;
+  responsabilidad_tributaria?: string;
+  direccion?: string;
+  ciudad?: string;
+  departamento?: string;
+  pais?: string;
+  telefono?: string;
+  correo?: string;
+}
+
+export interface DatosUblFactura {
+  emisor?: ParteFactura;
+  adquiriente?: ParteFactura;
+  tipo_operacion_dian?: string;
+  moneda?: string;
+  orden_pedido?: string;
+  archivo_origen?: string;
 }
 
 export interface Factura {
@@ -122,7 +149,12 @@ export interface Factura {
   id_reteica?: number;
   id_reteiva?: number;
   siigo_id?: string;
+  /** VENTA (la empresa activa emitió la factura) o COMPRA (la recibió) */
+  tipo_operacion?: 'VENTA' | 'COMPRA';
+  /** Cuenta de banco / medio de pago en Siigo usado como contrapartida ('' = predeterminado de Siigo) */
+  banco_siigo?: string;
   items?: FacturaItem[];
+  datos_ubl?: DatosUblFactura;
 }
 
 export interface CuentaPUC {
