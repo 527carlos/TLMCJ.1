@@ -435,9 +435,9 @@ export const AlmacenamientoEmpresasPanel: React.FC<Props> = ({ currentUser, acti
                         <tr key={a.id} className="hover:bg-slate-50/70">
                           <td className="py-2 px-3 font-semibold text-slate-800 max-w-[280px] truncate" title={a.nombre}>{a.nombre}</td>
                           <td className="py-2 px-3 text-slate-500">{nombreCategoria(a.categoria)}</td>
-                          <td className="py-2 px-3 font-mono text-slate-500">{a.periodo}</td>
+                          <td className="py-2 px-3 font-mono text-slate-500 whitespace-nowrap">{a.periodo}</td>
                           <td className="py-2 px-3 text-right text-slate-500">{formatoBytes(a.tamano_bytes)}</td>
-                          <td className="py-2 px-3 text-slate-500">{new Date(a.creado_en).toLocaleString('es-CO')}</td>
+                          <td className="py-2 px-3 text-slate-500 whitespace-nowrap">{new Date(a.creado_en).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}</td>
                           <td className="py-2 px-3">
                             <div className="flex justify-end gap-1.5">
                               {a.url && (
