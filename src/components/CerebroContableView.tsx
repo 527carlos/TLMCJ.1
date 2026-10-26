@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { CuentaPUC, BalanceTercero } from '../types/index.ts';
 import { BookOpen, Search, Layers, UserCheck, ArrowUpDown, CloudUpload, Trash2, Loader2, Scale } from 'lucide-react';
 import { apiJson } from '../lib/api.ts';
