@@ -58,6 +58,19 @@ export const facturas = pgTable('facturas', {
   cuentaGasto: text('cuenta_gasto').default('513535'),
   estadoSiigo: text('estado_siigo').default('PENDIENTE'),
   fechaCargue: text('fecha_cargue'),
+  // Campos ampliados (venta/compra, tercero completo, líneas UBL y parámetros Siigo)
+  tipoOperacion: text('tipo_operacion').default('COMPRA'),
+  telefono: text('telefono'),
+  direccion: text('direccion'),
+  ciudad: text('ciudad'),
+  departamento: text('departamento'),
+  correo: text('correo'),
+  reteicaTarifa: numeric('reteica_tarifa').default('0'),
+  reteivaPorc: numeric('reteiva_porc').default('0'),
+  bancoSiigo: text('banco_siigo'),
+  siigoId: text('siigo_id'),
+  items: jsonb('items'),
+  datosUbl: jsonb('datos_ubl'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

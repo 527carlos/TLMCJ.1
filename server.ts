@@ -3,6 +3,8 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import apiRouter from './src/server/routes/apiRouter.ts';
+import tlmRouter from './src/server/routes/tlmRouter.ts';
+import { EmpresaStorageService } from './src/server/services/empresaStorageService.ts';
 import { ExcelService } from './src/server/services/excelService.ts';
 import { CloudSqlService } from './src/server/services/cloudSqlService.ts';
 import { db } from './src/server/storage/dataStore.ts';
@@ -28,6 +30,15 @@ async function startServer() {
     console.warn(`[Consola TLM] Aviso al inicializar Cloud SQL:`, err);
   }
 
+  // Almacenamiento documental por empresa (Drive / unidad compartida / local)
+  try {
+    await EmpresaStorageService.inicializar();
+    const cred = EmpresaStorageService.credenciales();
+    console.log(`[Consola TLM] Almacenamiento por empresa listo. Google Drive: ${cred.modo ? `${cred.modo} (${cred.cuenta})` : 'sin credenciales, se usa almacenamiento local'}.`);
+  } catch (err) {
+    console.warn(`[Consola TLM] Aviso al inicializar el almacenamiento por empresa:`, err);
+  }
+
   // Generar base de datos en formato Excel (.xlsx) maestra al iniciar
   try {
     const { filePathPublic } = ExcelService.generarLibroCompleto(db);
@@ -40,6 +51,7 @@ async function startServer() {
   app.use(express.static(path.resolve(__dirname, 'public')));
 
   // API v1 Routers
+  app.use('/api/v1', tlmRouter);
   app.use('/api/v1', apiRouter);
 
   // Health check

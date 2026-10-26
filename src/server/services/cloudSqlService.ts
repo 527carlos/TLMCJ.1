@@ -1,4 +1,4 @@
-import { eq, desc, inArray } from 'drizzle-orm';
+import { eq, desc, inArray, and } from 'drizzle-orm';
 import { db as drizzleDb, pool, getActiveConnectionConfig } from '../../db/index.ts';
 import * as schema from '../../db/schema.ts';
 import fs from 'fs';
@@ -15,6 +15,50 @@ import type {
   PermisosUsuario 
 } from '../domain/types.ts';
 import { getDefaultPermissions } from '../storage/dataStore.ts';
+
+/** Convierte una fila de la tabla facturas al modelo de dominio (único punto de mapeo). */
+export function mapFacturaRow(r: any): Factura {
+  const subtotal = Number(r.subtotal || 0);
+  const iva = Number(r.iva || 0);
+  const retencion = Number(r.retencionValor || 0);
+  return {
+    id_factura: Number(r.id),
+    id_empresa: r.idEmpresa || 1,
+    factura_num: r.facturaNum,
+    proveedor: r.proveedor,
+    nit_tercero: r.nitTercero,
+    fecha: r.fecha,
+    fecha_vencimiento: r.fechaVencimiento || undefined,
+    tipo_comprobante: r.tipoComprobante || 'Factura Electrónica',
+    descripcion_item: r.descripcionItem,
+    cantidad: Number(r.cantidad || 1),
+    valor_unitario: Number(r.valorUnitario || 0),
+    subtotal,
+    iva,
+    total: r.total !== null && r.total !== undefined ? Number(r.total) : subtotal + iva - retencion,
+    retencion_porc: Number(r.retencionPorc || 0),
+    retencion_valor: retencion,
+    reteica_tarifa: Number(r.reteicaTarifa || 0),
+    reteiva_porc: Number(r.reteivaPorc || 0),
+    casilla_350: r.casilla350 || 83,
+    forma_pago: r.formaPago || 'Crédito',
+    medio_pago: r.medioPago || 'Transferencia Débito',
+    cuenta_gasto: r.cuentaGasto || '513535',
+    cufe_hash: r.cufeHash || '',
+    estado_revision: (r.estadoRevision as any) || 'PENDIENTE',
+    fecha_cargue: r.fechaCargue || new Date().toISOString(),
+    tipo_operacion: r.tipoOperacion === 'VENTA' ? 'VENTA' : 'COMPRA',
+    telefono: r.telefono || undefined,
+    direccion: r.direccion || undefined,
+    ciudad: r.ciudad || undefined,
+    departamento: r.departamento || undefined,
+    correo: r.correo || undefined,
+    banco_siigo: r.bancoSiigo || undefined,
+    siigo_id: r.siigoId || undefined,
+    items: Array.isArray(r.items) ? r.items : undefined,
+    datos_ubl: r.datosUbl || undefined,
+  };
+}
 
 export class CloudSqlService {
   private static isInitialized = false;
@@ -142,6 +186,19 @@ export class CloudSqlService {
       )`,
       `ALTER TABLE cuentas_puc ADD COLUMN IF NOT EXISTS id_empresa INTEGER DEFAULT 1`,
       `ALTER TABLE balance_terceros ADD COLUMN IF NOT EXISTS id_empresa INTEGER DEFAULT 1`,
+      `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS tipo_operacion TEXT DEFAULT 'COMPRA'`,
+      `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS telefono TEXT`,
+      `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS direccion TEXT`,
+      `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS ciudad TEXT`,
+      `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS departamento TEXT`,
+      `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS correo TEXT`,
+      `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS reteica_tarifa NUMERIC DEFAULT '0'`,
+      `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS reteiva_porc NUMERIC DEFAULT '0'`,
+      `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS banco_siigo TEXT`,
+      `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS siigo_id TEXT`,
+      `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS items JSONB`,
+      `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS datos_ubl JSONB`,
+      `CREATE INDEX IF NOT EXISTS idx_facturas_empresa_cufe ON facturas (id_empresa, cufe_hash)`,
       `SELECT setval('users_id_seq', (SELECT GREATEST(COALESCE(max(id), 0), 20) FROM users))`,
       `SELECT setval('empresas_id_seq', (SELECT GREATEST(COALESCE(max(id), 0), 10) FROM empresas))`,
       `SELECT setval('facturas_id_seq', (SELECT GREATEST(COALESCE(max(id), 0), 100) FROM facturas))`,
@@ -691,31 +748,7 @@ export class CloudSqlService {
         : drizzleDb.select().from(schema.facturas).orderBy(desc(schema.facturas.id));
       
       const rows = await query;
-      let mapped = rows.map(r => ({
-        id_factura: r.id,
-        id_empresa: r.idEmpresa || 1,
-        factura_num: r.facturaNum,
-        proveedor: r.proveedor,
-        nit_tercero: r.nitTercero,
-        fecha: r.fecha,
-        fecha_vencimiento: r.fechaVencimiento || undefined,
-        tipo_comprobante: r.tipoComprobante || 'Factura Electrónica',
-        descripcion_item: r.descripcionItem,
-        cantidad: Number(r.cantidad || 1),
-        valor_unitario: Number(r.valorUnitario || 0),
-        subtotal: Number(r.subtotal || 0),
-        iva: Number(r.iva || 0),
-        total: Number(r.total || (Number(r.subtotal || 0) + Number(r.iva || 0) - Number(r.retencionValor || 0))),
-        retencion_porc: Number(r.retencionPorc || 0),
-        retencion_valor: Number(r.retencionValor || 0),
-        casilla_350: r.casilla350 || 83,
-        forma_pago: r.formaPago || 'Crédito',
-        medio_pago: r.medioPago || 'Transferencia Débito',
-        cuenta_gasto: r.cuentaGasto || '513535',
-        cufe_hash: r.cufeHash || 'CUFE_MIGRADO_CLOUDSQL',
-        estado_revision: (r.estadoRevision as any) || 'APROBADA',
-        fecha_cargue: r.fechaCargue || new Date().toISOString(),
-      }));
+      let mapped = rows.map(r => mapFacturaRow(r));
 
       if (estado && estado !== 'TODOS') {
         mapped = mapped.filter(f => f.estado_revision === estado);
@@ -759,120 +792,69 @@ export class CloudSqlService {
       const subtotal = Number(data.subtotal || 0);
       const iva = Number(data.iva || 0);
       const retencionValor = Number(data.retencion_valor || 0);
-      const total = Number(data.total || (subtotal + iva - retencionValor));
+      const total = Number(data.total ?? (subtotal + iva - retencionValor));
       const cufeHash = data.cufe_hash || `cufe-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+      const idEmpresa = data.id_empresa || 1;
 
-      // Check if factura already exists by CUFE
-      if (data.cufe_hash) {
-        const existing = await drizzleDb.select().from(schema.facturas)
-          .where(eq(schema.facturas.cufeHash, data.cufe_hash))
-          .limit(1);
-
-        if (existing.length > 0) {
-          const prev = existing[0];
-          const updated = await drizzleDb.update(schema.facturas).set({
-            idEmpresa: data.id_empresa || prev.idEmpresa || 1,
-            facturaNum: data.factura_num || prev.facturaNum,
-            proveedor: data.proveedor || prev.proveedor,
-            nitTercero: data.nit_tercero || prev.nitTercero,
-            fecha: data.fecha || prev.fecha,
-            fechaVencimiento: data.fecha_vencimiento || prev.fechaVencimiento,
-            tipoComprobante: data.tipo_comprobante || prev.tipoComprobante,
-            descripcionItem: data.descripcion_item || prev.descripcionItem,
-            cantidad: String(data.cantidad || prev.cantidad || 1),
-            valorUnitario: String(data.valor_unitario || prev.valorUnitario || subtotal),
-            subtotal: String(subtotal),
-            iva: String(iva),
-            retencionPorc: String(data.retencion_porc || 0),
-            retencionValor: String(retencionValor),
-            total: String(total),
-            casilla350: data.casilla_350 || prev.casilla350 || 83,
-            formaPago: data.forma_pago || prev.formaPago || 'Crédito',
-            medioPago: data.medio_pago || prev.medioPago || 'Transferencia Débito',
-            cuentaGasto: data.cuenta_gasto || prev.cuentaGasto || '513535',
-            estadoRevision: data.estado_revision || prev.estadoRevision || 'AUDITADA',
-          }).where(eq(schema.facturas.id, prev.id)).returning();
-
-          const u = updated[0];
-          return {
-            id_factura: u.id,
-            id_empresa: u.idEmpresa || 1,
-            factura_num: u.facturaNum,
-            proveedor: u.proveedor,
-            nit_tercero: u.nitTercero,
-            fecha: u.fecha,
-            fecha_vencimiento: u.fechaVencimiento || undefined,
-            tipo_comprobante: u.tipoComprobante || 'Factura Electrónica',
-            descripcion_item: u.descripcionItem,
-            cantidad: Number(u.cantidad || 1),
-            valor_unitario: Number(u.valorUnitario || 0),
-            subtotal: Number(u.subtotal || 0),
-            iva: Number(u.iva || 0),
-            total: Number(u.total || 0),
-            retencion_porc: Number(u.retencionPorc || 0),
-            retencion_valor: Number(u.retencionValor || 0),
-            casilla_350: u.casilla350 || 83,
-            forma_pago: u.formaPago || 'Crédito',
-            medio_pago: u.medioPago || 'Transferencia Débito',
-            cuenta_gasto: u.cuentaGasto || '513535',
-            cufe_hash: u.cufeHash || '',
-            estado_revision: (u.estadoRevision as any) || 'AUDITADA',
-            fecha_cargue: u.fechaCargue || new Date().toISOString(),
-          };
-        }
-      }
-
-      const inserted = await drizzleDb.insert(schema.facturas).values({
-        idEmpresa: data.id_empresa || 1,
-        facturaNum: data.factura_num!,
-        proveedor: data.proveedor!,
-        nitTercero: data.nit_tercero!,
-        fecha: data.fecha!,
+      const valores = {
+        idEmpresa,
+        facturaNum: data.factura_num || `SN-${Date.now()}`,
+        proveedor: data.proveedor || 'Tercero no identificado',
+        nitTercero: data.nit_tercero || 'N/A',
+        fecha: data.fecha || 'SIN_FECHA',
         fechaVencimiento: data.fecha_vencimiento || null,
         tipoComprobante: data.tipo_comprobante || 'Factura Electrónica',
         descripcionItem: data.descripcion_item || 'Bienes o servicios',
         cantidad: String(data.cantidad || 1),
-        valorUnitario: String(data.valor_unitario || subtotal),
+        valorUnitario: String(data.valor_unitario ?? subtotal),
         subtotal: String(subtotal),
         iva: String(iva),
         retencionPorc: String(data.retencion_porc || 0),
         retencionValor: String(retencionValor),
         total: String(total),
-        estadoRevision: data.estado_revision || 'AUDITADA',
+        estadoRevision: data.estado_revision || 'PENDIENTE',
         cufeHash,
         casilla350: data.casilla_350 || 83,
         formaPago: data.forma_pago || 'Crédito',
         medioPago: data.medio_pago || 'Transferencia Débito',
         cuentaGasto: data.cuenta_gasto || '513535',
         fechaCargue: data.fecha_cargue || new Date().toISOString(),
-      }).returning();
-
-      const r = inserted[0];
-      return {
-        id_factura: r.id,
-        id_empresa: r.idEmpresa || 1,
-        factura_num: r.facturaNum,
-        proveedor: r.proveedor,
-        nit_tercero: r.nitTercero,
-        fecha: r.fecha,
-        fecha_vencimiento: r.fechaVencimiento || undefined,
-        tipo_comprobante: r.tipoComprobante || 'Factura Electrónica',
-        descripcion_item: r.descripcionItem,
-        cantidad: Number(r.cantidad || 1),
-        valor_unitario: Number(r.valorUnitario || 0),
-        subtotal: Number(r.subtotal || 0),
-        iva: Number(r.iva || 0),
-        total: Number(r.total || 0),
-        retencion_porc: Number(r.retencionPorc || 0),
-        retencion_valor: Number(r.retencionValor || 0),
-        casilla_350: r.casilla350 || 83,
-        forma_pago: r.formaPago || 'Crédito',
-        medio_pago: r.medioPago || 'Transferencia Débito',
-        cuenta_gasto: r.cuentaGasto || '513535',
-        cufe_hash: r.cufeHash || '',
-        estado_revision: (r.estadoRevision as any) || 'AUDITADA',
-        fecha_cargue: r.fechaCargue || new Date().toISOString(),
+        tipoOperacion: data.tipo_operacion || 'COMPRA',
+        telefono: data.telefono || null,
+        direccion: data.direccion || null,
+        ciudad: data.ciudad || null,
+        departamento: data.departamento || null,
+        correo: data.correo || null,
+        reteicaTarifa: String(data.reteica_tarifa || 0),
+        reteivaPorc: String(data.reteiva_porc || 0),
+        bancoSiigo: data.banco_siigo || null,
+        items: (data.items as any) || null,
+        datosUbl: (data.datos_ubl as any) || null,
       };
+
+      // Deduplicación por CUFE dentro de la misma empresa (cada empresa conserva su propia copia)
+      if (data.cufe_hash) {
+        const existing = await drizzleDb.select().from(schema.facturas)
+          .where(and(eq(schema.facturas.cufeHash, data.cufe_hash), eq(schema.facturas.idEmpresa, idEmpresa)))
+          .limit(1);
+
+        if (existing.length > 0) {
+          const prev = existing[0];
+          // Se refrescan los datos del XML pero se conservan las decisiones del usuario (estado, cuenta, banco)
+          const updated = await drizzleDb.update(schema.facturas).set({
+            ...valores,
+            estadoRevision: prev.estadoRevision || valores.estadoRevision,
+            cuentaGasto: prev.cuentaGasto || valores.cuentaGasto,
+            bancoSiigo: prev.bancoSiigo || valores.bancoSiigo,
+            siigoId: prev.siigoId,
+            fechaCargue: prev.fechaCargue || valores.fechaCargue,
+          }).where(eq(schema.facturas.id, prev.id)).returning();
+          return mapFacturaRow(updated[0]);
+        }
+      }
+
+      const inserted = await drizzleDb.insert(schema.facturas).values(valores).returning();
+      return mapFacturaRow(inserted[0]);
     } catch (error) {
       console.error('[CloudSQL] Error createFactura:', error);
       throw error;
@@ -887,6 +869,14 @@ export class CloudSqlService {
       if (data.casilla_350 !== undefined) updatePayload.casilla350 = data.casilla_350;
       if (data.retencion_porc !== undefined) updatePayload.retencionPorc = String(data.retencion_porc);
       if (data.retencion_valor !== undefined) updatePayload.retencionValor = String(data.retencion_valor);
+      if (data.reteica_tarifa !== undefined) updatePayload.reteicaTarifa = String(data.reteica_tarifa);
+      if (data.reteiva_porc !== undefined) updatePayload.reteivaPorc = String(data.reteiva_porc);
+      if (data.medio_pago !== undefined) updatePayload.medioPago = data.medio_pago;
+      if (data.banco_siigo !== undefined) updatePayload.bancoSiigo = data.banco_siigo;
+      if (data.siigo_id !== undefined) updatePayload.siigoId = data.siigo_id;
+      if (data.tipo_operacion !== undefined) updatePayload.tipoOperacion = data.tipo_operacion;
+      if (data.items !== undefined) updatePayload.items = data.items;
+      if (Object.keys(updatePayload).length === 0) return null;
 
       const updated = await drizzleDb.update(schema.facturas)
         .set(updatePayload)
@@ -894,31 +884,7 @@ export class CloudSqlService {
         .returning();
 
       if (!updated.length) return null;
-      const r = updated[0];
-      return {
-        id_factura: r.id,
-        id_empresa: r.idEmpresa || 1,
-        factura_num: r.facturaNum,
-        proveedor: r.proveedor,
-        nit_tercero: r.nitTercero,
-        fecha: r.fecha,
-        descripcion_item: r.descripcionItem,
-        cantidad: Number(r.cantidad || 1),
-        valor_unitario: Number(r.valorUnitario || 0),
-        subtotal: Number(r.subtotal || 0),
-        iva: Number(r.iva || 0),
-        total: Number(r.total || 0),
-        retencion_porc: Number(r.retencionPorc || 0),
-        retencion_valor: Number(r.retencionValor || 0),
-        casilla_350: r.casilla350 || 83,
-        forma_pago: r.formaPago || 'Crédito',
-        medio_pago: r.medioPago || 'Transferencia Débito',
-        cuenta_gasto: r.cuentaGasto || '513535',
-        tipo_comprobante: r.tipoComprobante || 'Factura Electrónica',
-        cufe_hash: r.cufeHash || '',
-        estado_revision: (r.estadoRevision as any) || 'APROBADA',
-        fecha_cargue: r.fechaCargue || new Date().toISOString(),
-      };
+      return mapFacturaRow(updated[0]);
     } catch (error) {
       console.error('[CloudSQL] Error updateFactura:', error);
       throw error;

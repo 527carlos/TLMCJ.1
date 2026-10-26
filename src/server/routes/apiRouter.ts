@@ -11,6 +11,7 @@ import { ExcelService } from '../services/excelService.ts';
 import { SqlGeneratorService } from '../services/sqlGeneratorService.ts';
 import { CloudSqlService } from '../services/cloudSqlService.ts';
 import { reconnectPool, getActiveConnectionConfig, parseConnectionString } from '../../db/index.ts';
+import { EmpresaStorageService } from '../services/empresaStorageService.ts';
 import type { Factura } from '../domain/types.ts';
 
 const router = Router();
@@ -1437,10 +1438,31 @@ router.post('/facturas/upload', upload.array('archivos'), async (req: Request, r
   const parsedFacturas: Partial<Factura>[] = [];
   let archivosXmlExtraidos = 0;
 
+  // NIT de la empresa activa: decide si cada documento es VENTA (emitido por ella) o COMPRA (recibido)
+  const empresasEnLinea = await CloudSqlService.getEmpresas().catch(() => []);
+  const empresaActiva = empresasEnLinea.find(e => e.id_empresa === idEmpresa) || db.empresas.find(e => e.id_empresa === idEmpresa);
+  const nitEmpresa = empresaActiva?.nit || '';
+  const archivados: { nombre: string; ok: boolean; error?: string }[] = [];
+
   for (const file of files) {
     // Use parseFileBuffer so ZIP archives are unpacked and all inner XMLs are processed
-    const parsedList = await xmlParser.parseFileBuffer(file.buffer, file.originalname);
+    const parsedList = await xmlParser.parseFileBuffer(file.buffer, file.originalname, nitEmpresa);
     archivosXmlExtraidos += parsedList.length;
+
+    // Conservar el archivo original en el almacenamiento de la empresa (Drive / unidad compartida / local)
+    if (empresaActiva) {
+      const fechas = parsedList.map(p => p.fecha).filter(f => /^\d{4}-\d{2}/.test(f)).sort();
+      const r = await EmpresaStorageService.archivar({
+        empresa: { id_empresa: empresaActiva.id_empresa, nit: empresaActiva.nit, nombre_comercial: empresaActiva.nombre_comercial },
+        categoria: 'FACTURAS_XML',
+        nombre: file.originalname,
+        contenido: file.buffer,
+        mime: file.mimetype || 'application/octet-stream',
+        periodo: fechas.length ? fechas[fechas.length - 1].substring(0, 7) : undefined,
+        usuario: db.usuarios.find(u => u.id_usuario === Number(req.headers['x-tlm-user-id']))?.nombre_completo
+      });
+      if (!r.omitido) archivados.push({ nombre: file.originalname, ok: r.ok, error: r.error });
+    }
 
     for (const p of parsedList) {
       parsedFacturas.push({
@@ -1448,9 +1470,11 @@ router.post('/facturas/upload', upload.array('archivos'), async (req: Request, r
         factura_num: p.factura_num,
         fecha: p.fecha,
         fecha_vencimiento: p.fecha_vencimiento,
+        tipo_operacion: p.tipo_operacion,
         proveedor: p.proveedor,
         nit_tercero: p.nit_tercero,
         telefono: p.telefono,
+        direccion: p.direccion,
         ciudad: p.ciudad,
         departamento: p.departamento,
         correo: p.correo,
@@ -1470,6 +1494,8 @@ router.post('/facturas/upload', upload.array('archivos'), async (req: Request, r
         cuenta_gasto: p.cuenta_gasto,
         tipo_comprobante: p.tipo_comprobante,
         cufe_hash: p.cufe_hash,
+        items: p.items,
+        datos_ubl: p.datos_ubl,
         estado_revision: 'PENDIENTE',
         fecha_cargue: new Date().toISOString()
       });
@@ -1512,6 +1538,9 @@ router.post('/facturas/upload', upload.array('archivos'), async (req: Request, r
   }
 
   if (processedFacturas.length > 0) {
+    // Reemplaza en la copia local las facturas de la misma empresa con el mismo CUFE (sin duplicar)
+    const claves = new Set(processedFacturas.map(f => `${f.id_empresa}|${f.cufe_hash}`));
+    db.facturas = db.facturas.filter(f => !claves.has(`${f.id_empresa}|${f.cufe_hash}`) && !processedFacturas.some(p => p.id_factura === f.id_factura));
     db.facturas.push(...processedFacturas);
     db.saveToDisk();
   }
@@ -1521,6 +1550,9 @@ router.post('/facturas/upload', upload.array('archivos'), async (req: Request, r
     archivos_procesados: files.length,
     xmls_extraidos: archivosXmlExtraidos,
     facturas_creadas: processedFacturas.length,
+    ventas: processedFacturas.filter(f => f.tipo_operacion === 'VENTA').length,
+    compras: processedFacturas.filter(f => f.tipo_operacion !== 'VENTA').length,
+    archivados,
     facturas: processedFacturas
   });
 });
@@ -1741,6 +1773,7 @@ router.patch('/facturas/:id/reteica', async (req: Request, res: Response) => {
   if (!f) return res.status(404).json({ detail: "Factura no encontrada." });
   f.reteica_tarifa = Number(reteica_tarifa);
   db.saveToDisk();
+  await CloudSqlService.updateFactura(id, { reteica_tarifa: f.reteica_tarifa }).catch(() => null);
 
   await CloudSqlService.addModificacion({
     autor_id: autor_id ? Number(autor_id) : undefined,
@@ -1760,6 +1793,7 @@ router.patch('/facturas/:id/reteiva', async (req: Request, res: Response) => {
   if (!f) return res.status(404).json({ detail: "Factura no encontrada." });
   f.reteiva_porc = Number(reteiva_porc);
   db.saveToDisk();
+  await CloudSqlService.updateFactura(id, { reteiva_porc: f.reteiva_porc }).catch(() => null);
 
   await CloudSqlService.addModificacion({
     autor_id: autor_id ? Number(autor_id) : undefined,
@@ -1779,6 +1813,7 @@ router.patch('/facturas/:id/medio-pago', async (req: Request, res: Response) => 
   if (!f) return res.status(404).json({ detail: "Factura no encontrada." });
   f.medio_pago = medio_pago;
   db.saveToDisk();
+  await CloudSqlService.updateFactura(id, { medio_pago }).catch(() => null);
 
   await CloudSqlService.addModificacion({
     autor_id: autor_id ? Number(autor_id) : undefined,
@@ -1974,6 +2009,7 @@ router.post('/siigo/enviar-facturas', async (req: Request, res: Response) => {
     if (resSync.status === 'success') {
       f.estado_revision = 'SINCRONIZADA_SIIGO';
       f.siigo_id = resSync.siigo_id;
+      await CloudSqlService.updateFactura(f.id_factura, { estado_revision: 'SINCRONIZADA_SIIGO', siigo_id: resSync.siigo_id }).catch(() => null);
     }
     resultados.push(resSync);
   }

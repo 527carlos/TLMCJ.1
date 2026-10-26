@@ -33,6 +33,8 @@ import {
   Activity
 } from 'lucide-react';
 import type { Usuario } from '../types/index.ts';
+import { AlmacenamientoEmpresasPanel } from './AlmacenamientoEmpresasPanel.tsx';
+import { FolderTree } from 'lucide-react';
 
 interface TableMeta {
   id: string;
@@ -105,7 +107,7 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
   const [tableSearchQuery, setTableSearchQuery] = useState<string>('');
   const [isMigrating, setIsMigrating] = useState<boolean>(false);
   const [migrationResult, setMigrationResult] = useState<any | null>(null);
-  const [activeTab, setActiveTab] = useState<'explorador' | 'gestiones' | 'conexion-externa' | 'migracion' | 'sql'>('explorador');
+  const [activeTab, setActiveTab] = useState<'explorador' | 'gestiones' | 'conexion-externa' | 'migracion' | 'sql' | 'almacenamiento'>('explorador');
   const [testingExternal, setTestingExternal] = useState<boolean>(false);
   const [externalTestResult, setExternalTestResult] = useState<any | null>(null);
 
@@ -537,6 +539,18 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveTab('almacenamiento')}
+          className={`pb-3 px-4 text-xs font-bold transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
+            activeTab === 'almacenamiento'
+              ? 'border-[#271a82] text-[#271a82]'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <FolderTree className="w-4 h-4" />
+          <span>Almacenamiento por Empresa</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('conexion-externa')}
           className={`pb-3 px-4 text-xs font-bold transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
             activeTab === 'conexion-externa'
@@ -588,6 +602,11 @@ export const BaseDatosCloudView: React.FC<BaseDatosCloudViewProps> = ({
           <span>Esquemas SQL & DDL PostgreSQL</span>
         </button>
       </div>
+
+      {/* TAB: ALMACENAMIENTO DOCUMENTAL POR EMPRESA */}
+      {activeTab === 'almacenamiento' && (
+        <AlmacenamientoEmpresasPanel currentUser={currentUser} onShowToast={onShowToast} />
+      )}
 
       {/* TAB 1: EXPLORADOR DE TABLAS */}
       {activeTab === 'explorador' && (

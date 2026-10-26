@@ -1,10 +1,44 @@
 import crypto from 'crypto';
 import JSZip from 'jszip';
 
+export interface ParteUbl {
+  nit: string;
+  dv?: string;
+  tipo_documento?: string;
+  razon_social: string;
+  nombre_comercial?: string;
+  tipo_contribuyente?: string;
+  regimen_fiscal?: string;
+  responsabilidad_tributaria?: string;
+  direccion?: string;
+  ciudad?: string;
+  departamento?: string;
+  pais?: string;
+  telefono?: string;
+  correo?: string;
+}
+
+export interface LineaUbl {
+  linea: number;
+  codigo?: string;
+  descripcion_item: string;
+  unidad?: string;
+  cantidad: number;
+  valor_unitario: number;
+  descuento: number;
+  subtotal: number;
+  iva: number;
+  iva_porc: number;
+  inc: number;
+}
+
 export interface ParsedXmlInvoice {
   factura_num: string;
   fecha: string;
   fecha_vencimiento?: string;
+  /** VENTA si el emisor es la empresa activa, COMPRA en cualquier otro caso */
+  tipo_operacion: 'VENTA' | 'COMPRA';
+  /** Contraparte: cliente (en ventas) o proveedor (en compras). Se conserva el nombre "proveedor" por compatibilidad. */
   proveedor: string;
   nit_tercero: string;
   telefono?: string;
@@ -29,7 +63,140 @@ export interface ParsedXmlInvoice {
   tipo_comprobante: string;
   cufe_hash: string;
   estado_revision: 'PENDIENTE' | 'AUDITADA';
-  items?: any[];
+  items: LineaUbl[];
+  datos_ubl: {
+    emisor: ParteUbl;
+    adquiriente: ParteUbl;
+    tipo_operacion_dian?: string;
+    moneda?: string;
+    orden_pedido?: string;
+    archivo_origen?: string;
+  };
+}
+
+// ==========================================
+// Utilidades de lectura de XML por expresiones regulares (rápidas y tolerantes a namespaces)
+// ==========================================
+const decodificar = (s: string) =>
+  s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+
+const etiqueta = (bloque: string, nombre: string): string => {
+  const re = new RegExp(`<(?:[\\w-]+:)?${nombre}\\b[^>]*>([^<]*)</(?:[\\w-]+:)?${nombre}>`, 'i');
+  const m = bloque.match(re);
+  return m ? decodificar(m[1]) : '';
+};
+
+const atributo = (bloque: string, nombre: string, attr: string): string => {
+  const re = new RegExp(`<(?:[\\w-]+:)?${nombre}\\b[^>]*\\b${attr}="([^"]*)"`, 'i');
+  const m = bloque.match(re);
+  return m ? m[1] : '';
+};
+
+const bloque = (texto: string, nombre: string): string => {
+  const re = new RegExp(`<(?:[\\w-]+:)?${nombre}\\b[\\s\\S]*?</(?:[\\w-]+:)?${nombre}>`, 'i');
+  const m = texto.match(re);
+  return m ? m[0] : '';
+};
+
+const bloques = (texto: string, nombre: string): string[] => {
+  const re = new RegExp(`<(?:[\\w-]+:)?${nombre}\\b[\\s\\S]*?</(?:[\\w-]+:)?${nombre}>`, 'gi');
+  return texto.match(re) || [];
+};
+
+const num = (v: string): number => {
+  const n = parseFloat((v || '').replace(/,/g, ''));
+  return Number.isFinite(n) ? n : 0;
+};
+
+const soloDigitos = (v: string) => (v || '').split('-')[0].replace(/[^\d]/g, '');
+
+const MEDIOS_PAGO: Record<string, string> = {
+  '10': 'Efectivo',
+  '20': 'Cheque',
+  '42': 'Consignación bancaria',
+  '47': 'Transferencia Débito',
+  '48': 'Tarjeta Crédito',
+  '49': 'Tarjeta Débito',
+  ZZZ: 'Acuerdo mutuo'
+};
+
+const TIPOS_OPERACION: Record<string, string> = {
+  '10': '10 - Estándar',
+  '09': '09 - AIU',
+  '11': '11 - Mandatos',
+  '20': '20 - Nota crédito con referencia',
+  '22': '22 - Nota crédito sin referencia',
+  SS_CUFE: 'SS - Documento soporte'
+};
+
+const REGIMEN: Record<string, string> = { '48': 'Responsable de IVA', '49': 'No responsable de IVA' };
+
+function parsearParte(bloqueParte: string): ParteUbl {
+  const taxScheme = bloque(bloqueParte, 'PartyTaxScheme') || bloqueParte;
+  const legal = bloque(bloqueParte, 'PartyLegalEntity');
+  const direccionBloque = bloque(taxScheme, 'RegistrationAddress') || bloque(bloqueParte, 'PhysicalLocation') || bloque(bloqueParte, 'Address');
+  const contacto = bloque(bloqueParte, 'Contact');
+  const companyIdBloque = taxScheme.match(/<(?:[\w-]+:)?CompanyID\b[^>]*>[^<]*<\//i)?.[0] || legal.match(/<(?:[\w-]+:)?CompanyID\b[^>]*>[^<]*<\//i)?.[0] || '';
+  const companyId = etiqueta(taxScheme, 'CompanyID') || etiqueta(legal, 'CompanyID') || etiqueta(bloqueParte, 'ID');
+  const tipoOrg = etiqueta(bloqueParte, 'AdditionalAccountID');
+  const regimenCodigo = atributo(taxScheme, 'TaxLevelCode', 'listName');
+
+  return {
+    nit: soloDigitos(companyId),
+    dv: (companyIdBloque.match(/schemeID="(\d)"/i) || [])[1],
+    tipo_documento: (companyIdBloque.match(/schemeName="(\d+)"/i) || [])[1] === '31' ? 'NIT' : ((companyIdBloque.match(/schemeName="(\d+)"/i) || [])[1] === '13' ? 'Cédula de ciudadanía' : 'NIT'),
+    razon_social: etiqueta(taxScheme, 'RegistrationName') || etiqueta(legal, 'RegistrationName') || etiqueta(bloque(bloqueParte, 'PartyName'), 'Name'),
+    nombre_comercial: etiqueta(bloque(bloqueParte, 'PartyName'), 'Name') || undefined,
+    tipo_contribuyente: tipoOrg === '1' ? 'Persona Jurídica' : tipoOrg === '2' ? 'Persona Natural' : undefined,
+    regimen_fiscal: REGIMEN[regimenCodigo] || (regimenCodigo ? `R-${regimenCodigo}` : undefined),
+    responsabilidad_tributaria: etiqueta(taxScheme, 'TaxLevelCode') || undefined,
+    direccion: etiqueta(bloque(direccionBloque, 'AddressLine'), 'Line') || undefined,
+    ciudad: etiqueta(direccionBloque, 'CityName') || undefined,
+    departamento: etiqueta(direccionBloque, 'CountrySubentity') || undefined,
+    pais: etiqueta(bloque(direccionBloque, 'Country'), 'Name') || undefined,
+    telefono: etiqueta(contacto, 'Telephone') || undefined,
+    correo: etiqueta(contacto, 'ElectronicMail') || undefined
+  };
+}
+
+function parsearLineas(xml: string, esNotaCredito: boolean): LineaUbl[] {
+  const nombreLinea = esNotaCredito ? 'CreditNoteLine' : 'InvoiceLine';
+  const nombreCantidad = esNotaCredito ? 'CreditedQuantity' : 'InvoicedQuantity';
+  return bloques(xml, nombreLinea).map((l, i) => {
+    const cantidad = num(etiqueta(l, nombreCantidad)) || 1;
+    const subtotal = num(etiqueta(l, 'LineExtensionAmount'));
+    const item = bloque(l, 'Item');
+    let iva = 0;
+    let ivaPorc = 0;
+    let inc = 0;
+    for (const sub of bloques(l, 'TaxSubtotal')) {
+      const id = etiqueta(bloque(sub, 'TaxScheme'), 'ID');
+      const monto = num(etiqueta(sub, 'TaxAmount'));
+      if (id === '01' || !id) {
+        iva += monto;
+        ivaPorc = num(etiqueta(sub, 'Percent')) || ivaPorc;
+      } else if (id === '04') {
+        inc += monto;
+      }
+    }
+    const descuento = bloques(l, 'AllowanceCharge')
+      .filter(a => /<(?:[\w-]+:)?ChargeIndicator[^>]*>false</i.test(a))
+      .reduce((s, a) => s + num(etiqueta(a, 'Amount')), 0);
+    const precio = num(etiqueta(bloque(l, 'Price'), 'PriceAmount')) || (cantidad ? subtotal / cantidad : subtotal);
+    return {
+      linea: Number(etiqueta(l, 'ID')) || i + 1,
+      codigo: etiqueta(bloque(item, 'StandardItemIdentification'), 'ID') || etiqueta(bloque(item, 'SellersItemIdentification'), 'ID') || undefined,
+      descripcion_item: etiqueta(item, 'Description') || etiqueta(item, 'Name') || `Ítem ${i + 1}`,
+      unidad: atributo(l, nombreCantidad, 'unitCode') || undefined,
+      cantidad,
+      valor_unitario: precio,
+      descuento,
+      subtotal,
+      iva,
+      iva_porc: ivaPorc,
+      inc
+    };
+  });
 }
 
 export class XmlUblParserService {
@@ -37,57 +204,51 @@ export class XmlUblParserService {
    * Main entry point for processing uploaded buffers (supports both direct XML and ZIP packages)
    */
   public async parseFileBuffer(buffer: Buffer, fileName: string = "factura.xml", nitEmpresaActiva: string = ""): Promise<ParsedXmlInvoice[]> {
-    const isZip = fileName.toLowerCase().endsWith('.zip') || 
+    const isZip = fileName.toLowerCase().endsWith('.zip') ||
                   (buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4B && buffer[2] === 0x03 && buffer[3] === 0x04);
 
     if (isZip) {
       return this.parseZipBuffer(buffer, fileName, nitEmpresaActiva);
     }
 
-    // Direct XML file
+    return this.parseXmlUbl(this.bufferATexto(buffer), fileName, nitEmpresaActiva);
+  }
+
+  private bufferATexto(buffer: Buffer): string {
     let text = buffer.toString('utf-8');
-    // Check if declared encoding is ISO-8859-1 or latin1
     if (/encoding=["'](?:ISO-8859-1|latin1|windows-1252)["']/i.test(text.substring(0, 200))) {
       text = buffer.toString('latin1');
     }
-    // Remove UTF-8 BOM if present
     if (text.charCodeAt(0) === 0xFEFF) {
       text = text.substring(1);
     }
-
-    return this.parseXmlUbl(text, fileName, nitEmpresaActiva);
+    return text;
   }
 
   /**
-   * Unpacks a ZIP archive and extracts all contained XML invoices
+   * Unpacks a ZIP archive and extracts all contained XML invoices (also nested ZIPs, as sent by many DIAN providers)
    */
-  public async parseZipBuffer(zipBuffer: Buffer, zipFileName: string, nitEmpresaActiva: string = ""): Promise<ParsedXmlInvoice[]> {
+  public async parseZipBuffer(zipBuffer: Buffer, zipFileName: string, nitEmpresaActiva: string = "", profundidad = 0): Promise<ParsedXmlInvoice[]> {
     const results: ParsedXmlInvoice[] = [];
     try {
       const zip = await JSZip.loadAsync(zipBuffer);
-      const entries = Object.keys(zip.files).filter(name => {
-        const lower = name.toLowerCase();
-        return lower.endsWith('.xml') && !name.includes('__MACOSX') && !name.startsWith('.');
-      });
+      const nombres = Object.keys(zip.files).filter(name => !zip.files[name].dir && !name.includes('__MACOSX') && !name.split('/').pop()!.startsWith('.'));
 
-      console.log(`[XML-Parser] Procesando ZIP "${zipFileName}" con ${entries.length} archivos XML encontrados.`);
-
-      for (const entryName of entries) {
+      for (const entryName of nombres) {
+        const lower = entryName.toLowerCase();
         try {
-          const fileData = await zip.files[entryName].async('nodebuffer');
-          let text = fileData.toString('utf-8');
-          if (/encoding=["'](?:ISO-8859-1|latin1|windows-1252)["']/i.test(text.substring(0, 200))) {
-            text = fileData.toString('latin1');
+          if (lower.endsWith('.xml')) {
+            const fileData = await zip.files[entryName].async('nodebuffer');
+            results.push(...this.parseXmlUbl(this.bufferATexto(fileData), entryName, nitEmpresaActiva));
+          } else if (lower.endsWith('.zip') && profundidad < 2) {
+            const interno = await zip.files[entryName].async('nodebuffer');
+            results.push(...(await this.parseZipBuffer(interno, entryName, nitEmpresaActiva, profundidad + 1)));
           }
-          if (text.charCodeAt(0) === 0xFEFF) {
-            text = text.substring(1);
-          }
-          const parsed = this.parseXmlUbl(text, entryName, nitEmpresaActiva);
-          results.push(...parsed);
         } catch (err) {
           console.warn(`[XML-Parser] Error extrayendo "${entryName}" dentro de ${zipFileName}:`, err);
         }
       }
+      console.log(`[XML-Parser] ZIP "${zipFileName}": ${results.length} documentos UBL extraídos.`);
     } catch (zipErr) {
       console.error(`[XML-Parser] Error leyendo archivo ZIP ${zipFileName}:`, zipErr);
     }
@@ -96,19 +257,17 @@ export class XmlUblParserService {
 
   /**
    * Parse DIAN UBL 2.1 XML content into canonical structured invoice object.
+   * Soporta Invoice, CreditNote y el contenedor AttachedDocument (CDATA o base64).
    */
-  public parseXmlUbl(rawXmlContent: string, fileName: string = "factura.xml", _nitEmpresaActiva: string = ""): ParsedXmlInvoice[] {
+  public parseXmlUbl(rawXmlContent: string, fileName: string = "factura.xml", nitEmpresaActiva: string = ""): ParsedXmlInvoice[] {
     try {
       let xmlContent = rawXmlContent.trim();
 
-      // Check if this is an AttachedDocument wrapper (DIAN standard contenedor)
-      if (/<AttachedDocument\b/i.test(xmlContent)) {
-        // Look for CDATA containing the real inner Invoice or CreditNote
-        const cdataMatch = xmlContent.match(/<!\[CDATA\[([\s\S]*?<\/(?:Invoice|CreditNote)>)[\s\S]*?\]\]>/i);
-        if (cdataMatch && cdataMatch[1] && (cdataMatch[1].includes('<Invoice') || cdataMatch[1].includes('<CreditNote'))) {
+      if (/<(?:[\w-]+:)?AttachedDocument\b/i.test(xmlContent)) {
+        const cdataMatch = xmlContent.match(/<!\[CDATA\[([\s\S]*?<\/(?:[\w-]+:)?(?:Invoice|CreditNote)>)[\s\S]*?\]\]>/i);
+        if (cdataMatch && /<(?:[\w-]+:)?(?:Invoice|CreditNote)\b/.test(cdataMatch[1])) {
           xmlContent = cdataMatch[1].trim();
         } else {
-          // Look for base64 encoded document
           const base64Match = xmlContent.match(/<(?:cbc:EmbeddedDocumentBinaryObject|cbc:Description)[^>]*>([A-Za-z0-9+/=\r\n]{60,})<\//i);
           if (base64Match) {
             try {
@@ -121,164 +280,132 @@ export class XmlUblParserService {
         }
       }
 
-      const isCreditNote = /<CreditNote\b/i.test(xmlContent);
-
-      // Invoice Number
-      const invoiceNumberMatch = 
-        xmlContent.match(/<cbc:ID[^>]*>([^<]+)<\/cbc:ID>/i) ||
-        xmlContent.match(/<ID[^>]*>([^<]+)<\/ID>/i);
-      let factura_num = invoiceNumberMatch ? invoiceNumberMatch[1].trim() : "";
-      if (!factura_num || factura_num.length > 35 || factura_num.startsWith("http")) {
-        factura_num = fileName.replace(/\.[^/.]+$/, "").replace(/[^\w-]/g, "") || "FE-" + Math.floor(1000 + Math.random() * 9000);
+      // Solo documentos UBL de factura o nota crédito
+      if (!/<(?:[\w-]+:)?(?:Invoice|CreditNote)\b/i.test(xmlContent)) {
+        return [];
       }
 
-      // Issue Date
-      const dateMatch = 
-        xmlContent.match(/<cbc:IssueDate[^>]*>([^<]+)<\/cbc:IssueDate>/i) ||
-        xmlContent.match(/<IssueDate[^>]*>([^<]+)<\/IssueDate>/i);
-      const fecha = dateMatch ? dateMatch[1].trim() : 'SIN_FECHA';
+      // Quitar extensiones DIAN y firma para que no contaminen las búsquedas
+      const xml = xmlContent
+        .replace(/<(?:[\w-]+:)?UBLExtensions\b[\s\S]*?<\/(?:[\w-]+:)?UBLExtensions>/gi, '')
+        .replace(/<(?:[\w-]+:)?Signature\b[\s\S]*?<\/(?:[\w-]+:)?Signature>/gi, '');
 
-      // Due Date
-      const dueDateMatch = 
-        xmlContent.match(/<cbc:PaymentDueDate[^>]*>([^<]+)<\/cbc:PaymentDueDate>/i) ||
-        xmlContent.match(/<cbc:DueDate[^>]*>([^<]+)<\/cbc:DueDate>/i);
-      const fecha_vencimiento = dueDateMatch ? dueDateMatch[1].trim() : fecha;
+      const isCreditNote = /<(?:[\w-]+:)?CreditNote\b/i.test(xml);
+      const lineasXml = isCreditNote ? 'CreditNoteLine' : 'InvoiceLine';
+      const encabezado = xml.replace(new RegExp(`<(?:[\\w-]+:)?${lineasXml}\\b[\\s\\S]*?</(?:[\\w-]+:)?${lineasXml}>`, 'gi'), '');
 
-      // CUFE / UUID
-      const cufeMatch = 
-        xmlContent.match(/<cbc:UUID[^>]*>([^<]+)<\/cbc:UUID>/i) ||
-        xmlContent.match(/<UUID[^>]*>([^<]+)<\/UUID>/i);
-      let cufe_hash = cufeMatch ? cufeMatch[1].trim() : "";
+      // Número y fechas (del encabezado, no de las líneas)
+      const sinPartes = encabezado
+        .replace(/<(?:[\w-]+:)?AccountingSupplierParty\b[\s\S]*?<\/(?:[\w-]+:)?AccountingSupplierParty>/gi, '')
+        .replace(/<(?:[\w-]+:)?AccountingCustomerParty\b[\s\S]*?<\/(?:[\w-]+:)?AccountingCustomerParty>/gi, '');
+      let factura_num = etiqueta(sinPartes, 'ID');
+      if (!factura_num || factura_num.length > 35 || factura_num.startsWith('http')) {
+        factura_num = fileName.split('/').pop()!.replace(/\.[^/.]+$/, '').replace(/[^\w-]/g, '') || `FE-${Date.now()}`;
+      }
+      const fecha = etiqueta(sinPartes, 'IssueDate') || 'SIN_FECHA';
+      const fecha_vencimiento = etiqueta(sinPartes, 'PaymentDueDate') || etiqueta(sinPartes, 'DueDate') || fecha;
+
+      let cufe_hash = etiqueta(sinPartes, 'UUID');
       if (!cufe_hash || cufe_hash.length < 10) {
         cufe_hash = crypto.createHash('sha256').update(rawXmlContent).digest('hex');
       }
 
-      // Proveedor / AccountingSupplierParty
-      const supplierBlockMatch = xmlContent.match(/<cac:AccountingSupplierParty[\s\S]*?<\/cac:AccountingSupplierParty>/i);
-      const supplierBlock = supplierBlockMatch ? supplierBlockMatch[0] : xmlContent;
+      // Partes
+      const emisor = parsearParte(bloque(encabezado, 'AccountingSupplierParty'));
+      const adquiriente = parsearParte(bloque(encabezado, 'AccountingCustomerParty'));
+      const nitEmpresa = soloDigitos(nitEmpresaActiva);
+      const tipo_operacion: 'VENTA' | 'COMPRA' = nitEmpresa && emisor.nit === nitEmpresa ? 'VENTA' : 'COMPRA';
+      const tercero = tipo_operacion === 'VENTA' ? adquiriente : emisor;
 
-      const nameMatch = 
-        supplierBlock.match(/<cbc:RegistrationName[^>]*>([^<]+)<\/cbc:RegistrationName>/i) ||
-        supplierBlock.match(/<cac:PartyName[\s\S]*?<cbc:Name[^>]*>([^<]+)<\/cbc:Name>/i) ||
-        xmlContent.match(/<cbc:RegistrationName[^>]*>([^<]+)<\/cbc:RegistrationName>/i);
-      let proveedor = nameMatch ? nameMatch[1].trim() : "PROVEEDOR NACIONAL S.A.S.";
-      proveedor = proveedor.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+      // Pago
+      const pago = bloque(encabezado, 'PaymentMeans');
+      const forma_pago = etiqueta(pago, 'ID') === '1' ? 'Contado' : 'Crédito';
+      const codigoMedio = etiqueta(pago, 'PaymentMeansCode');
+      const medio_pago = MEDIOS_PAGO[codigoMedio] || (codigoMedio ? `Código ${codigoMedio}` : 'Transferencia Débito');
 
-      // NIT Proveedor
-      const nitMatch = 
-        supplierBlock.match(/<cbc:CompanyID[^>]*>([^<]+)<\/cbc:CompanyID>/i) ||
-        xmlContent.match(/<cac:AccountingSupplierParty[\s\S]*?<cbc:CompanyID[^>]*>([^<]+)<\/cbc:CompanyID>/i);
-      let nit_tercero = nitMatch ? nitMatch[1].trim().split('-')[0].replace(/[^\d]/g, "") : "";
-      if (!nit_tercero || nit_tercero.length < 5) {
-        nit_tercero = "901" + Math.floor(100000 + Math.random() * 900000);
-      }
+      // Líneas
+      const items = parsearLineas(xml, isCreditNote);
 
-      // Ciudad / Dirección
-      const cityMatch = supplierBlock.match(/<cbc:CityName[^>]*>([^<]+)<\/cbc:CityName>/i);
-      const ciudad = cityMatch ? cityMatch[1].trim() : "Bogotá D.C.";
+      // Totales del encabezado
+      const totales = bloque(encabezado, 'LegalMonetaryTotal');
+      let subtotalVal = num(etiqueta(totales, 'LineExtensionAmount'));
+      let totalVal = num(etiqueta(totales, 'PayableAmount'));
+      let ivaVal = bloques(encabezado, 'TaxTotal')
+        .filter(t => !/WithholdingTaxTotal/i.test(t))
+        .flatMap(t => bloques(t, 'TaxSubtotal'))
+        .filter(s => ['01', ''].includes(etiqueta(bloque(s, 'TaxScheme'), 'ID')))
+        .reduce((s, sub) => s + num(etiqueta(sub, 'TaxAmount')), 0);
 
-      // Forma y Medio de Pago
-      let forma_pago = "Crédito";
-      let medio_pago = "Transferencia Débito";
-      if (xmlContent.includes('PaymentMeans')) {
-        if (/PaymentMeans[\s\S]*?<cbc:ID[^>]*>1<\/cbc:ID>/i.test(xmlContent)) {
-          forma_pago = "Contado";
-        }
-        if (/PaymentMeans[\s\S]*?<cbc:PaymentMeansCode[^>]*>10<\/cbc:PaymentMeansCode>/i.test(xmlContent)) {
-          medio_pago = "Efectivo";
-        } else if (/PaymentMeans[\s\S]*?<cbc:PaymentMeansCode[^>]*>47<\/cbc:PaymentMeansCode>/i.test(xmlContent)) {
-          medio_pago = "Transferencia Débito";
-        } else if (/PaymentMeans[\s\S]*?<cbc:PaymentMeansCode[^>]*>48<\/cbc:PaymentMeansCode>/i.test(xmlContent)) {
-          medio_pago = "Tarjeta Crédito";
-        }
-      }
+      if (subtotalVal === 0 && items.length) subtotalVal = items.reduce((s, it) => s + it.subtotal, 0);
+      if (ivaVal === 0 && items.length) ivaVal = items.reduce((s, it) => s + it.iva, 0);
+      if (subtotalVal === 0 && totalVal > 0) subtotalVal = ivaVal > 0 ? totalVal - ivaVal : Math.round(totalVal / 1.19);
+      if (totalVal === 0) totalVal = subtotalVal + ivaVal;
 
-      // Monetary Totals (LegalMonetaryTotal)
-      const subtotalMatch = 
-        xmlContent.match(/<cac:LegalMonetaryTotal[\s\S]*?<cbc:LineExtensionAmount[^>]*>([^<]+)<\/cbc:LineExtensionAmount>/i) ||
-        xmlContent.match(/<cbc:LineExtensionAmount[^>]*>([^<]+)<\/cbc:LineExtensionAmount>/i);
-      let subtotalVal = subtotalMatch ? parseFloat(subtotalMatch[1].trim()) : 0;
+      const lineas: LineaUbl[] = items.length
+        ? items
+        : [{ linea: 1, descripcion_item: 'Bienes y servicios', cantidad: 1, valor_unitario: subtotalVal, descuento: 0, subtotal: subtotalVal, iva: ivaVal, iva_porc: subtotalVal ? Math.round((ivaVal / subtotalVal) * 100) : 0, inc: 0 }];
 
-      const taxAmountMatch = 
-        xmlContent.match(/<cac:TaxTotal[\s\S]*?<cbc:TaxAmount[^>]*>([^<]+)<\/cbc:TaxAmount>/i) ||
-        xmlContent.match(/<cbc:TaxAmount[^>]*>([^<]+)<\/cbc:TaxAmount>/i);
-      let ivaVal = taxAmountMatch ? parseFloat(taxAmountMatch[1].trim()) : 0;
+      const descripcion = lineas.length === 1 ? lineas[0].descripcion_item : `${lineas[0].descripcion_item} (+${lineas.length - 1} ítems)`;
+      const cantidadTotal = lineas.reduce((s, l) => s + l.cantidad, 0);
 
-      const totalMatch = 
-        xmlContent.match(/<cac:LegalMonetaryTotal[\s\S]*?<cbc:PayableAmount[^>]*>([^<]+)<\/cbc:PayableAmount>/i) ||
-        xmlContent.match(/<cbc:PayableAmount[^>]*>([^<]+)<\/cbc:PayableAmount>/i);
-      let totalVal = totalMatch ? parseFloat(totalMatch[1].trim()) : 0;
-
-      if (subtotalVal === 0 && totalVal > 0) {
-        subtotalVal = ivaVal > 0 ? (totalVal - ivaVal) : Math.round(totalVal / 1.19);
-      }
-      if (ivaVal === 0 && subtotalVal > 0 && totalVal > subtotalVal) {
-        ivaVal = totalVal - subtotalVal;
-      }
-      if (totalVal === 0) {
-        totalVal = subtotalVal + ivaVal;
-      }
-
-      // Descripción del ítem
-      const descMatch = 
-        xmlContent.match(/<cac:Item[\s\S]*?<cbc:Description[^>]*>([^<]+)<\/cbc:Description>/i) ||
-        xmlContent.match(/<cbc:Description[^>]*>([^<]+)<\/cbc:Description>/i);
-      let descripcion = descMatch ? descMatch[1].trim() : "Adquisición de bienes y servicios operacionales";
-      descripcion = descripcion.replace(/&amp;/g, '&').replace(/&quot;/g, '"');
-
-      // Clasificación tributaria UVT / F350
-      let casilla_350 = 64; // Compras por defecto
+      // Clasificación contable / F350 (solo aplica retención en compras)
+      let casilla_350 = 64;
       let retencion_porc = 0;
-      let cuenta_gasto = "513535";
-      const descLower = (descripcion + " " + proveedor).toLowerCase();
-
-      if (descLower.includes("honorario") || descLower.includes("asesor") || descLower.includes("consult")) {
-        casilla_350 = 61; // Honorarios
-        retencion_porc = 10.0;
-        cuenta_gasto = "511010";
-      } else if (descLower.includes("servicio") || descLower.includes("mantenimiento") || descLower.includes("soporte") || descLower.includes("nube") || descLower.includes("cloud") || descLower.includes("licencia")) {
-        casilla_350 = 62; // Servicios
-        retencion_porc = subtotalVal >= 176000 ? 4.0 : 0.0;
-        cuenta_gasto = "513535";
-      } else if (descLower.includes("arriend") || descLower.includes("canon") || descLower.includes("inmueble")) {
-        casilla_350 = 63; // Arrendamientos
-        retencion_porc = 3.5;
-        cuenta_gasto = "512010";
-      } else {
-        // Compras de bienes generales
-        casilla_350 = 64;
-        retencion_porc = subtotalVal >= 1189000 ? 2.5 : 0.0;
-        cuenta_gasto = "519530";
+      let cuenta_gasto = tipo_operacion === 'VENTA' ? '41350101' : '519530';
+      if (tipo_operacion === 'COMPRA') {
+        const descLower = (lineas.map(l => l.descripcion_item).join(' ') + ' ' + tercero.razon_social).toLowerCase();
+        if (/honorario|asesor|consult/.test(descLower)) {
+          casilla_350 = 61; retencion_porc = 10.0; cuenta_gasto = '511010';
+        } else if (/servicio|mantenimiento|soporte|nube|cloud|licencia/.test(descLower)) {
+          casilla_350 = 62; retencion_porc = subtotalVal >= 176000 ? 4.0 : 0.0; cuenta_gasto = '513535';
+        } else if (/arriend|canon|inmueble/.test(descLower)) {
+          casilla_350 = 63; retencion_porc = 3.5; cuenta_gasto = '512010';
+        } else {
+          casilla_350 = 64; retencion_porc = subtotalVal >= 1189000 ? 2.5 : 0.0; cuenta_gasto = '519530';
+        }
       }
-
       const retencion_valor = Math.round((subtotalVal * retencion_porc) / 100);
+      const signo = isCreditNote ? -1 : 1;
 
       return [
         {
           factura_num,
           fecha,
           fecha_vencimiento,
-          proveedor,
-          nit_tercero,
-          ciudad,
-          departamento: "Cundinamarca",
+          tipo_operacion,
+          proveedor: tercero.razon_social || 'TERCERO NO IDENTIFICADO',
+          nit_tercero: tercero.nit || 'N/A',
+          telefono: tercero.telefono,
+          direccion: tercero.direccion,
+          ciudad: tercero.ciudad,
+          departamento: tercero.departamento,
+          correo: tercero.correo,
           descripcion_item: descripcion,
-          cantidad: 1,
-          valor_unitario: subtotalVal,
-          subtotal: subtotalVal,
-          iva: ivaVal,
-          total: totalVal,
+          cantidad: cantidadTotal,
+          valor_unitario: lineas.length === 1 ? lineas[0].valor_unitario : (cantidadTotal ? subtotalVal / cantidadTotal : subtotalVal),
+          subtotal: signo * subtotalVal,
+          iva: signo * ivaVal,
+          total: signo * totalVal,
           casilla_350,
           retencion_porc,
-          retencion_valor,
-          reteica_tarifa: 9.66,
-          reteiva_porc: ivaVal > 0 ? 15.0 : 0.0,
+          retencion_valor: signo * retencion_valor,
+          reteica_tarifa: 0,
+          reteiva_porc: 0,
           forma_pago,
           medio_pago,
           cuenta_gasto,
-          tipo_comprobante: isCreditNote ? "Nota de Crédito" : "Factura Electrónica",
+          tipo_comprobante: isCreditNote ? 'Nota de Crédito' : 'Factura Electrónica',
           cufe_hash,
-          estado_revision: "AUDITADA"
+          estado_revision: 'PENDIENTE',
+          items: lineas,
+          datos_ubl: {
+            emisor,
+            adquiriente,
+            tipo_operacion_dian: TIPOS_OPERACION[etiqueta(sinPartes, 'CustomizationID')] || etiqueta(sinPartes, 'CustomizationID') || undefined,
+            moneda: etiqueta(sinPartes, 'DocumentCurrencyCode') || 'COP',
+            orden_pedido: etiqueta(bloque(sinPartes, 'OrderReference'), 'ID') || undefined,
+            archivo_origen: fileName
+          }
         }
       ];
     } catch (err: any) {

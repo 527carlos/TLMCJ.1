@@ -80,7 +80,9 @@ export interface Factura {
   proveedor: string;
   nit_tercero: string;
   telefono?: string;
+  direccion?: string;
   ciudad?: string;
+  departamento?: string;
   correo?: string;
   descripcion_item: string;
   cantidad: number;
@@ -101,6 +103,93 @@ export interface Factura {
   estado_revision: 'PENDIENTE' | 'AUDITADA' | 'RECHAZADA' | 'SINCRONIZADA_SIIGO';
   fecha_cargue: string;
   siigo_id?: string;
+  tipo_operacion?: 'VENTA' | 'COMPRA';
+  banco_siigo?: string;
+  items?: FacturaItem[];
+  datos_ubl?: {
+    emisor?: ParteFactura;
+    adquiriente?: ParteFactura;
+    tipo_operacion_dian?: string;
+    moneda?: string;
+    archivo_origen?: string;
+  };
+}
+
+export interface FacturaItem {
+  linea: number;
+  codigo?: string;
+  descripcion_item: string;
+  unidad?: string;
+  cantidad: number;
+  valor_unitario: number;
+  descuento?: number;
+  subtotal: number;
+  iva: number;
+  iva_porc?: number;
+  inc?: number;
+  cuenta_contable?: string;
+}
+
+export interface ParteFactura {
+  nit: string;
+  razon_social: string;
+  nombre_comercial?: string;
+  tipo_contribuyente?: string;
+  regimen_fiscal?: string;
+  responsabilidad_tributaria?: string;
+  direccion?: string;
+  ciudad?: string;
+  departamento?: string;
+  telefono?: string;
+  correo?: string;
+}
+
+// ==========================================
+// Almacenamiento documental por empresa
+// ==========================================
+export type ProveedorAlmacenamiento = 'LOCAL' | 'GOOGLE_DRIVE_CARPETA' | 'GOOGLE_UNIDAD_COMPARTIDA';
+export type CategoriaArchivo = 'FACTURAS_XML' | 'SOPORTES_PDF' | 'AUDITORIA' | 'EXPORTES_ERP' | 'CONCILIACIONES' | 'CEREBRO_CONTABLE' | 'RESPALDOS';
+
+export interface AlmacenamientoEmpresa {
+  id_empresa: number;
+  proveedor: ProveedorAlmacenamiento;
+  raiz_id?: string;
+  raiz_url?: string;
+  raiz_nombre?: string;
+  crear_carpeta_empresa: boolean;
+  carpeta_empresa_id?: string;
+  carpeta_empresa_url?: string;
+  unidad_compartida_id?: string;
+  subcarpetas: Partial<Record<CategoriaArchivo, string>>;
+  organizar_por_periodo: boolean;
+  archivado_automatico: Record<CategoriaArchivo, boolean>;
+  estado: 'SIN_CONFIGURAR' | 'CONECTADO' | 'ERROR';
+  ultimo_error?: string;
+  verificado_en?: string;
+  actualizado_por?: string;
+  actualizado_en?: string;
+}
+
+export interface ArchivoEmpresa {
+  id: string;
+  id_empresa: number;
+  categoria: CategoriaArchivo;
+  nombre: string;
+  periodo: string;
+  proveedor: ProveedorAlmacenamiento;
+  url?: string;
+  tamano_bytes: number;
+  mime: string;
+  creado_en: string;
+  creado_por?: string;
+}
+
+/** Resultado de archivado que devuelven las funciones contables */
+export interface ResultadoArchivado {
+  ok: boolean;
+  omitido?: boolean;
+  error?: string;
+  archivo?: ArchivoEmpresa;
 }
 
 export interface CuentaPUC {

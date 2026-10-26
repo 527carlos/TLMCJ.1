@@ -285,12 +285,14 @@ export default function App() {
     try {
       const res = await fetch('/api/v1/facturas/upload', {
         method: 'POST',
+        headers: { 'x-tlm-user-id': String(currentUser?.id_usuario || '') },
         body: formData
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Error procesando los archivos.');
       if (data.facturas_creadas > 0) {
-        showToast(`¡Se procesaron ${data.archivos_procesados} archivo(s) y se sincronizaron ${data.facturas_creadas} facturas en la base de datos!`);
+        const fallos = (data.archivados || []).filter((a: any) => !a.ok).length;
+        showToast(`Se procesaron ${data.archivos_procesados} archivo(s): ${data.facturas_creadas} facturas (${data.ventas ?? 0} ventas, ${data.compras ?? 0} compras)${fallos ? `. ${fallos} original(es) no se pudieron guardar en la carpeta de la empresa` : '. Originales guardados en la carpeta de la empresa'}.`, fallos ? 'info' : 'success');
       } else {
         showToast(`Se procesaron ${data.archivos_procesados} archivo(s), pero no se detectaron nuevas facturas válidas.`, 'info');
       }
@@ -683,6 +685,7 @@ export default function App() {
               onNavigate={setCurrentSection}
               onQuickUpload={handleSeedDemo}
               onOpenBrandCustomizer={() => setIsBrandModalOpen(true)}
+              idEmpresa={activeEmpresa?.id_empresa}
             />
           )}
 
@@ -690,6 +693,9 @@ export default function App() {
             <FacturasView
               facturas={facturas}
               cuentasPUC={cuentasPUC}
+              activeEmpresa={activeEmpresa}
+              onRefresh={loadData}
+              onShowToast={showToast}
               onUploadXml={handleUploadXml}
               onUploadXmlWithProgress={handleUploadXml}
               onSeedDemo={handleSeedDemo}
@@ -711,12 +717,9 @@ export default function App() {
 
           {currentSection === 'conciliacion' && (
             <ConciliacionView
-              summary={conciliacionSummary}
-              onExecuteReconciliation={handleExecuteReconciliation}
-              onGenerateFlatFile={handleGenerateFlatFile}
-              isRunning={isConciliating}
-              onUploadExtracto={handleUploadExtracto}
-              activeEmpresaId={activeEmpresa?.id_empresa || 1}
+              idEmpresa={activeEmpresa?.id_empresa || 1}
+              nombreEmpresa={activeEmpresa?.nombre_comercial}
+              onShowToast={showToast}
             />
           )}
 
@@ -724,6 +727,10 @@ export default function App() {
             <CerebroContableView
               cuentasPUC={cuentasPUC}
               balanceTerceros={balanceTerceros}
+              idEmpresa={activeEmpresa?.id_empresa}
+              puedeEliminar={currentUser?.rol === 'Administrador' || currentUser?.rol === 'Desarrollador'}
+              onRefresh={loadData}
+              onShowToast={showToast}
             />
           )}
 
