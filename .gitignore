@@ -9,6 +9,6 @@ coverage/
 .env
 
 # Archivos contables por empresa (almacenamiento local) y estado de trabajo
-storage/
+/storage/
 data/almacenamiento_empresas.json
 data/conciliaciones_empresas.json
