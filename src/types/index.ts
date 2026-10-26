@@ -80,7 +80,9 @@ export interface Factura {
   proveedor: string;
   nit_tercero: string;
   telefono?: string;
+  direccion?: string;
   ciudad?: string;
+  departamento?: string;
   correo?: string;
   descripcion_item: string;
   cantidad: number;
