@@ -77,15 +77,6 @@ export const CerebroContableView: React.FC<CerebroContableViewProps> = ({ cuenta
   const [searchPuc, setSearchPuc] = useState('');
   const [searchBalance, setSearchBalance] = useState('');
 
-  const [pucFile, setPucFile] = useState<File | null>(null);
-  const [balanceFile, setBalanceFile] = useState<File | null>(null);
-
-  const [isUploadingPuc, setIsUploadingPuc] = useState(false);
-  const [isUploadingBalance, setIsUploadingBalance] = useState(false);
-
-  const pucInputRef = useRef<HTMLInputElement>(null);
-  const balanceInputRef = useRef<HTMLInputElement>(null);
-
   const formatCOP = (num: number) => {
     return new Intl.NumberFormat('es-CO', {
       style: 'currency',
@@ -105,63 +96,6 @@ export const CerebroContableView: React.FC<CerebroContableViewProps> = ({ cuenta
     b.nombre_tercero.toLowerCase().includes(searchBalance.toLowerCase())
   );
 
-  const handleSincronizarPuc = async () => {
-    if (!pucFile) {
-      alert('Por favor seleccione un archivo de PUC (.xlsx, .xls o .csv)');
-      return;
-    }
-
-    setIsUploadingPuc(true);
-    const formData = new FormData();
-    formData.append('archivo_puc', pucFile);
-    formData.append('nit', activeEmpresa?.nit || '900543210-9');
-
-    try {
-      const res = await fetch('/api/v1/contabilidad/puc-masivo', {
-        method: 'POST',
-        body: formData
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Error cargando PUC');
-      onShowToast?.(data.mensaje || 'Plan Único de Cuentas sincronizado con éxito.', 'success');
-      setPucFile(null);
-      if (pucInputRef.current) pucInputRef.current.value = '';
-      onRefreshData?.();
-    } catch (err: any) {
-      alert(err.message || 'Error cargando PUC');
-    } finally {
-      setIsUploadingPuc(false);
-    }
-  };
-
-  const handleSincronizarBalance = async () => {
-    if (!balanceFile) {
-      alert('Por favor seleccione un archivo de Balance de Prueba (.xlsx, .xls o .csv)');
-      return;
-    }
-
-    setIsUploadingBalance(true);
-    const formData = new FormData();
-    formData.append('archivo_balance', balanceFile);
-    formData.append('id_empresa', (activeEmpresa?.id_empresa || 1).toString());
-
-    try {
-      const res = await fetch('/api/v1/contabilidad/balance-masivo', {
-        method: 'POST',
-        body: formData
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Error cargando Balance');
-      onShowToast?.(data.mensaje || 'Balance de prueba sincronizado con éxito.', 'success');
-      setBalanceFile(null);
-      if (balanceInputRef.current) balanceInputRef.current.value = '';
-      onRefreshData?.();
-    } catch (err: any) {
-      alert(err.message || 'Error cargando Balance');
-    } finally {
-      setIsUploadingBalance(false);
-    }
-  };
 
   return (
     <div className="space-y-6">
