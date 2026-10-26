@@ -15,6 +15,18 @@ import { EmpresaStorageService } from '../services/empresaStorageService.ts';
 import type { Factura } from '../domain/types.ts';
 
 const router = Router();
+
+// Nunca enviar al navegador hashes de contraseña, códigos OTP ni llaves de Siigo
+const usuarioPublico = (u: any) => {
+  if (!u) return u;
+  const { hashed_password, codigo_recuperacion, codigo_recuperacion_expira, verification_token, ...resto } = u;
+  return resto;
+};
+const empresaPublica = (e: any) => {
+  if (!e) return e;
+  const { siigo_access_key, ...resto } = e;
+  return { ...resto, siigo_access_key: siigo_access_key ? '••••••••••••••••' : undefined, has_siigo_credentials: Boolean(e.siigo_username && siigo_access_key) };
+};
 const upload = multer({ limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB support for batch uploads
 
 // ==========================================
@@ -78,7 +90,7 @@ router.post('/auth/login', async (req: Request, res: Response) => {
     empresas_ids: user.empresas_ids,
     avatar_url: user.avatar_url || null,
     requiere_cambio_password: mustChange,
-    usuario: user,
+    usuario: usuarioPublico(user),
     mensaje_seguridad: mustChange 
       ? "Contraseña provisional detectada asignada por el Administrador. Debes cambiarla obligatoriamente a una contraseña alfanumérica de mínimo 8 caracteres antes de continuar."
       : undefined
@@ -396,12 +408,12 @@ router.get('/auth/usuarios', async (_req: Request, res: Response) => {
   try {
     const usuarios = await CloudSqlService.getUsuarios();
     if (usuarios.length > 0) {
-      return res.json(usuarios);
+      return res.json(usuarios.map(usuarioPublico));
     }
   } catch (err) {
     console.warn('[CloudSQL] Fallback usuarios a DataStore local:', err);
   }
-  res.json(db.usuarios);
+  res.json(db.usuarios.map(usuarioPublico));
 });
 
 router.patch('/auth/usuarios/:id/aprobar', async (req: Request, res: Response) => {
@@ -1315,12 +1327,12 @@ router.get('/empresas', async (_req: Request, res: Response) => {
   try {
     const list = await CloudSqlService.getEmpresas();
     if (list.length > 0) {
-      return res.json(list);
+      return res.json(list.map(empresaPublica));
     }
   } catch (err) {
     console.warn('[CloudSQL] Error consultando empresas en línea:', err);
   }
-  res.json(db.empresas);
+  res.json(db.empresas.map(empresaPublica));
 });
 
 router.post('/empresas', async (req: Request, res: Response) => {
@@ -1341,7 +1353,7 @@ router.post('/empresas', async (req: Request, res: Response) => {
     });
 
     db.empresas.push(nuevaEmpresa);
-    res.status(201).json(nuevaEmpresa);
+    res.status(201).json(empresaPublica(nuevaEmpresa));
   } catch (err: any) {
     console.error('[CloudSQL] Error creando empresa en línea:', err);
     res.status(500).json({ detail: "Error creando empresa en Cloud SQL: " + err.message });
@@ -1369,9 +1381,15 @@ router.get('/empresas/:id/siigo-config', async (req: Request, res: Response) => 
 
 router.put('/empresas/:id/siigo-config', async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
-  const { siigo_username, siigo_access_key, siigo_document_id } = req.body;
+  const { siigo_username, siigo_document_id } = req.body;
+  let { siigo_access_key } = req.body;
 
   try {
+    // Llave vacía o enmascarada = conservar la llave guardada
+    if (!siigo_access_key || String(siigo_access_key).includes('•')) {
+      const actuales = await CloudSqlService.getEmpresas().catch(() => []);
+      siigo_access_key = (actuales.find(e => e.id_empresa === id) || db.empresas.find(e => e.id_empresa === id))?.siigo_access_key || '';
+    }
     await CloudSqlService.updateEmpresaSiigo(id, {
       siigo_username: siigo_username || '',
       siigo_access_key: siigo_access_key || '',
