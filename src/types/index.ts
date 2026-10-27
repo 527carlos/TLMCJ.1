@@ -105,6 +105,10 @@ export interface Factura {
   siigo_id?: string;
   tipo_operacion?: 'VENTA' | 'COMPRA';
   banco_siigo?: string;
+  id_medio_pago?: number | null;
+  id_retencion?: number | null;
+  id_reteica?: number | null;
+  id_reteiva?: number | null;
   items?: FacturaItem[];
   datos_ubl?: {
     emisor?: ParteFactura;

@@ -22,6 +22,15 @@ const usuarioPublico = (u: any) => {
   const { hashed_password, codigo_recuperacion, codigo_recuperacion_expira, verification_token, ...resto } = u;
   return resto;
 };
+/** Usuario que hace la solicitud (encabezado x-tlm-user-id enviado por la interfaz) */
+const usuarioSolicitante = async (req: Request) => {
+  const id = Number(req.headers['x-tlm-user-id']);
+  if (!id) return null;
+  return (await CloudSqlService.getUsuarioById(id).catch(() => null)) || db.usuarios.find(u => u.id_usuario === id) || null;
+};
+const esAdministrador = (u: any) => Boolean(u && (u.rol === 'Administrador' || u.rol === 'Desarrollador' || u.permisos?.administrador));
+/** Un usuario no administrador solo ve las empresas que tiene asignadas */
+const visiblesPara = (lista: any[], u: any) => (!u || esAdministrador(u) ? lista : lista.filter(e => (u.empresas_ids || []).includes(e.id_empresa)));
 const empresaPublica = (e: any) => {
   if (!e) return e;
   const { siigo_access_key, ...resto } = e;
@@ -1323,25 +1332,31 @@ router.post('/sistema/database/seed-fresh', (_req: Request, res: Response) => {
 // ==========================================
 // 2. EMPRESAS Y MULTI-TENANCY
 // ==========================================
-router.get('/empresas', async (_req: Request, res: Response) => {
+router.get('/empresas', async (req: Request, res: Response) => {
+  const u = await usuarioSolicitante(req);
   try {
     const list = await CloudSqlService.getEmpresas();
     if (list.length > 0) {
-      return res.json(list.map(empresaPublica));
+      return res.json(visiblesPara(list, u).map(empresaPublica));
     }
   } catch (err) {
     console.warn('[CloudSQL] Error consultando empresas en línea:', err);
   }
-  res.json(db.empresas.map(empresaPublica));
+  res.json(visiblesPara(db.empresas, u).map(empresaPublica));
 });
 
 router.post('/empresas', async (req: Request, res: Response) => {
-  const { nombre_comercial, nit, software_erp, siigo_username, siigo_access_key, siigo_document_id } = req.body;
+  const { nombre_comercial, nit, software_erp, siigo_username, siigo_access_key, siigo_document_id, logo_url } = req.body;
   if (!nombre_comercial || !nit) {
     return res.status(400).json({ detail: "Nombre comercial y NIT son obligatorios." });
   }
 
   try {
+    const existentes = await CloudSqlService.getEmpresas().catch(() => db.empresas);
+    const nitLimpio = String(nit).split('-')[0].replace(/[^\d]/g, '');
+    if (existentes.some(e => String(e.nit).split('-')[0].replace(/[^\d]/g, '') === nitLimpio)) {
+      return res.status(409).json({ detail: `Ya existe una empresa con el NIT ${nit}. Pida al administrador que se la asigne.` });
+    }
     const nuevaEmpresa = await CloudSqlService.createEmpresa({
       nombre_comercial,
       nit,
@@ -1349,10 +1364,21 @@ router.post('/empresas', async (req: Request, res: Response) => {
       software_destino: software_erp || "SIIGO_NUBE",
       siigo_username,
       siigo_access_key,
-      siigo_document_id: siigo_document_id || 24
+      siigo_document_id: siigo_document_id || 24,
+      logo_url: logo_url || undefined
     });
 
     db.empresas.push(nuevaEmpresa);
+
+    // Quien crea el cliente queda asignado como su gestor
+    const creador = await usuarioSolicitante(req);
+    if (creador && !(creador.empresas_ids || []).includes(nuevaEmpresa.id_empresa)) {
+      const empresas_ids = [...(creador.empresas_ids || []), nuevaEmpresa.id_empresa];
+      await CloudSqlService.updateUsuario(creador.id_usuario, { empresas_ids }).catch(() => null);
+      const local = db.usuarios.find(x => x.id_usuario === creador.id_usuario);
+      if (local) local.empresas_ids = empresas_ids;
+      db.saveToDisk();
+    }
     res.status(201).json(empresaPublica(nuevaEmpresa));
   } catch (err: any) {
     console.error('[CloudSQL] Error creando empresa en línea:', err);
@@ -1390,6 +1416,13 @@ router.put('/empresas/:id/siigo-config', async (req: Request, res: Response) => 
       const actuales = await CloudSqlService.getEmpresas().catch(() => []);
       siigo_access_key = (actuales.find(e => e.id_empresa === id) || db.empresas.find(e => e.id_empresa === id))?.siigo_access_key || '';
     }
+    // Las credenciales se prueban en vivo contra Siigo antes de guardarlas
+    if (siigo_username && siigo_access_key && req.body.validar !== false) {
+      const prueba = await siigoService.testConnection(siigo_username, siigo_access_key);
+      if (!prueba.ok) {
+        return res.status(400).json({ detail: `Siigo rechazó las credenciales: ${prueba.message}` });
+      }
+    }
     await CloudSqlService.updateEmpresaSiigo(id, {
       siigo_username: siigo_username || '',
       siigo_access_key: siigo_access_key || '',
@@ -1404,7 +1437,7 @@ router.put('/empresas/:id/siigo-config', async (req: Request, res: Response) => 
     }
 
     res.json({
-      mensaje: "Configuración de Siigo Nube actualizada con éxito en Cloud SQL.",
+      mensaje: siigo_username && siigo_access_key ? "Credenciales verificadas con Siigo Nube y guardadas." : "Configuración de Siigo guardada.",
       id_empresa: id,
       siigo_username,
       siigo_document_id
@@ -1555,6 +1588,8 @@ router.post('/facturas/upload', upload.array('archivos'), async (req: Request, r
     } as Factura));
   }
 
+  const duplicadasCount = processedFacturas.filter((f: any) => f._duplicada).length;
+  processedFacturas = processedFacturas.map((f: any) => { const { _duplicada, ...resto } = f; return resto as Factura; });
   if (processedFacturas.length > 0) {
     // Reemplaza en la copia local las facturas de la misma empresa con el mismo CUFE (sin duplicar)
     const claves = new Set(processedFacturas.map(f => `${f.id_empresa}|${f.cufe_hash}`));
@@ -1568,6 +1603,8 @@ router.post('/facturas/upload', upload.array('archivos'), async (req: Request, r
     archivos_procesados: files.length,
     xmls_extraidos: archivosXmlExtraidos,
     facturas_creadas: processedFacturas.length,
+    facturas_duplicadas: duplicadasCount,
+    facturas_nuevas: processedFacturas.length - duplicadasCount,
     ventas: processedFacturas.filter(f => f.tipo_operacion === 'VENTA').length,
     compras: processedFacturas.filter(f => f.tipo_operacion !== 'VENTA').length,
     archivados,
@@ -1640,6 +1677,38 @@ router.post('/facturas/seed-demo', async (req: Request, res: Response) => {
     res.json({ mensaje: "2 Facturas demo inyectadas en línea a Cloud SQL.", total: all.length });
   } catch (err: any) {
     res.status(500).json({ detail: "Error sembrando demo en Cloud SQL: " + err.message });
+  }
+});
+
+/** Vacía todas las facturas de una empresa (solo Administrador). Debe ir antes de /facturas/:id. */
+router.delete('/facturas/limpiar-todo', async (req: Request, res: Response) => {
+  const idEmpresa = Number(req.query.id_empresa);
+  if (!Number.isInteger(idEmpresa) || idEmpresa <= 0) {
+    return res.status(400).json({ detail: 'Indique la empresa (id_empresa).' });
+  }
+  const usuario = await usuarioSolicitante(req);
+  if (usuario && !esAdministrador(usuario)) {
+    return res.status(403).json({ detail: 'Solo un Administrador puede vaciar todas las facturas de una empresa.' });
+  }
+  try {
+    let ids: number[] = [];
+    try {
+      ids = (await CloudSqlService.getFacturas()).filter(f => f.id_empresa === idEmpresa).map(f => f.id_factura);
+    } catch {
+      ids = db.facturas.filter(f => f.id_empresa === idEmpresa).map(f => f.id_factura);
+    }
+    let eliminadas = 0;
+    try {
+      eliminadas = ids.length ? await CloudSqlService.bulkDeleteFacturas(ids) : 0;
+    } catch (err) {
+      console.warn('[CloudSQL] No disponible al vaciar facturas; se limpia la copia local:', err);
+    }
+    const antes = db.facturas.length;
+    db.facturas = db.facturas.filter(f => f.id_empresa !== idEmpresa);
+    if (db.facturas.length !== antes) db.saveToDisk();
+    res.json({ mensaje: `Se eliminaron ${Math.max(eliminadas, antes - db.facturas.length)} facturas de la empresa.`, eliminadas: Math.max(eliminadas, antes - db.facturas.length) });
+  } catch (err: any) {
+    res.status(500).json({ detail: 'Error vaciando facturas: ' + err.message });
   }
 });
 
@@ -1888,7 +1957,10 @@ router.get('/impuestos/f350', async (req: Request, res: Response) => {
   if (facts.length === 0) {
     facts = db.facturas.filter(f => f.id_empresa === idEmpresa);
   }
-  const report = f350TaxEngine.calculateF350(facts);
+  const report = f350TaxEngine.calculateF350(facts, {
+    desde: (req.query.desde as string) || (req.query.fecha_desde as string) || undefined,
+    hasta: (req.query.hasta as string) || (req.query.fecha_hasta as string) || undefined
+  });
   res.json(report);
 });
 
@@ -2023,7 +2095,9 @@ router.post('/siigo/enviar-facturas', async (req: Request, res: Response) => {
     const f = db.facturas.find(fact => fact.id_factura === id);
     if (!f) continue;
 
-    const resSync = await siigoService.transmitInvoiceToSiigo(f, id_tipo_doc || 24, id_medio_pago);
+    const emp = (await CloudSqlService.getEmpresas().catch(() => [])).find(e => e.id_empresa === f.id_empresa) || db.empresas.find(e => e.id_empresa === f.id_empresa);
+    const cred = emp?.siigo_username && emp?.siigo_access_key ? { username: emp.siigo_username, access_key: emp.siigo_access_key } : undefined;
+    const resSync = await siigoService.transmitInvoiceToSiigo(f, id_tipo_doc || emp?.siigo_document_id || 24, id_medio_pago, cred);
     if (resSync.status === 'success') {
       f.estado_revision = 'SINCRONIZADA_SIIGO';
       f.siigo_id = resSync.siigo_id;

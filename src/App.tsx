@@ -7,7 +7,8 @@ import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar.tsx';
 import { Header } from './components/Header.tsx';
 import { DashboardView } from './components/DashboardView.tsx';
-import { FacturasView } from './components/FacturasView.tsx';
+import { FacturasView, FiltrosPeriodo } from './components/FacturasView.tsx';
+import { NuevaEmpresaModal } from './components/EmpresaSelector.tsx';
 import { CentroFiscalView } from './components/CentroFiscalView.tsx';
 import { ConciliacionView } from './components/ConciliacionView.tsx';
 import { CerebroContableView } from './components/CerebroContableView.tsx';
@@ -145,6 +146,8 @@ export default function App() {
   const [siigoPushFacturas, setSiigoPushFacturas] = useState<Factura[] | null>(null);
 
   // Notification Toast State
+  const [filtrosPeriodo, setFiltrosPeriodo] = useState<FiltrosPeriodo>({ desde: '', hasta: '', tipo: 'TODOS' });
+  const [nuevaEmpresaAbierta, setNuevaEmpresaAbierta] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
 
   const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
@@ -158,18 +161,29 @@ export default function App() {
     setIsRefreshing(true);
     try {
       // 1. Fetch Empresas
-      const resEmpresas = await fetch('/api/v1/empresas');
+      const resEmpresas = await fetch('/api/v1/empresas', { headers: { 'x-tlm-user-id': String(currentUser?.id_usuario || '') } });
       const dataEmpresas = await resEmpresas.json();
       const uniqueEmpresas = (Array.isArray(dataEmpresas) ? dataEmpresas : []).filter(
         (e: Empresa, index: number, self: Empresa[]) => index === self.findIndex((t) => t.id_empresa === e.id_empresa)
       );
       setEmpresas(uniqueEmpresas);
-      if (uniqueEmpresas.length > 0 && !activeEmpresa) {
-        setActiveEmpresa(uniqueEmpresas[0]);
+      let empresaVigente = activeEmpresa && uniqueEmpresas.find((e: Empresa) => e.id_empresa === activeEmpresa.id_empresa);
+      if (!empresaVigente && uniqueEmpresas.length > 0) {
+        let guardada: string | null = null;
+        try { guardada = localStorage.getItem('tlm_empresa_activa'); } catch {}
+        empresaVigente = uniqueEmpresas.find((e: Empresa) => String(e.id_empresa) === guardada) || uniqueEmpresas[0];
+        setActiveEmpresa(empresaVigente);
+        // el efecto dependiente de la empresa volverá a cargar sus datos
+        if (empresaVigente.id_empresa !== activeEmpresa?.id_empresa) return;
+      }
+      if (!empresaVigente) {
+        setActiveEmpresa(null);
+        setFacturas([]);
+        return;
       }
 
       // 2. Fetch Facturas
-      const empId = activeEmpresa ? activeEmpresa.id_empresa : 1;
+      const empId = empresaVigente.id_empresa;
       const resFacturas = await fetch(`/api/v1/facturas?id_empresa=${empId}`);
       const dataFacturas = await resFacturas.json();
       const uniqueFacturas = (Array.isArray(dataFacturas) ? dataFacturas : []).filter(
@@ -192,7 +206,7 @@ export default function App() {
       setBalanceTerceros(Array.isArray(dataBalance) ? dataBalance : []);
 
       // 5. Fetch F350 Report
-      const resF350 = await fetch(`/api/v1/impuestos/f350?id_empresa=${empId}`);
+      const resF350 = await fetch(`/api/v1/impuestos/f350?id_empresa=${empId}&desde=${filtrosPeriodo.desde}&hasta=${filtrosPeriodo.hasta}`);
       const dataF350 = await resF350.json();
       setF350Report(dataF350);
 
@@ -273,6 +287,31 @@ export default function App() {
       loadUsuariosOnly();
     }
   }, [activeEmpresa?.id_empresa, currentUser?.id_usuario]);
+
+  useEffect(() => {
+    if (activeEmpresa) { try { localStorage.setItem('tlm_empresa_activa', String(activeEmpresa.id_empresa)); } catch {} }
+  }, [activeEmpresa?.id_empresa]);
+
+  // El periodo filtra también el Formulario 350
+  useEffect(() => {
+    if (!currentUser || !activeEmpresa) return;
+    fetch(`/api/v1/impuestos/f350?id_empresa=${activeEmpresa.id_empresa}&desde=${filtrosPeriodo.desde}&hasta=${filtrosPeriodo.hasta}`)
+      .then(r => r.json()).then(setF350Report).catch(() => {});
+  }, [filtrosPeriodo.desde, filtrosPeriodo.hasta]);
+
+  const handleCrearEmpresa = async (datos: { nombre_comercial: string; nit: string; software_erp: string; logo_url?: string }) => {
+    const res = await fetch('/api/v1/empresas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-tlm-user-id': String(currentUser?.id_usuario || '') },
+      body: JSON.stringify(datos)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'No se pudo crear la empresa.');
+    const nueva: Empresa = data.empresa || data;
+    setEmpresas(prev => [...prev.filter(e => e.id_empresa !== nueva.id_empresa), nueva]);
+    setActiveEmpresa(nueva);
+    showToast(`Cliente "${nueva.nombre_comercial}" creado. Ya puede cargar su información contable.`, 'success');
+  };
 
   // Actions
   const handleUploadXml = async (files: FileList): Promise<{ archivos_procesados: number; xmls_extraidos: number; facturas_creadas: number }> => {
@@ -634,6 +673,10 @@ export default function App() {
   return (
     <div className="flex h-screen bg-[#F8F9FA] text-slate-900 font-sans antialiased overflow-hidden">
       {/* Toast Notification */}
+      {nuevaEmpresaAbierta && (
+        <NuevaEmpresaModal onClose={() => setNuevaEmpresaAbierta(false)} onCrear={handleCrearEmpresa} />
+      )}
+
       {toast && (
         <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-2xl shadow-xl text-xs font-bold text-white flex items-center gap-2 animate-in slide-in-from-top duration-200 ${
           toast.type === 'error' ? 'bg-red-600' : 'bg-[#271A82]'
@@ -650,7 +693,8 @@ export default function App() {
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         activeEmpresa={activeEmpresa}
         empresas={empresas}
-        onSelectEmpresa={setActiveEmpresa}
+        onSelectEmpresa={(e) => { setActiveEmpresa(e); setFacturas([]); }}
+        onCrearEmpresa={() => setNuevaEmpresaAbierta(true)}
         pendingInvoicesCount={pendingInvoices}
         customLogoUrl={customLogoUrl}
         currentUser={currentUser}
@@ -692,6 +736,13 @@ export default function App() {
 
         {/* Dynamic Main Body */}
         <main className="flex-1 overflow-y-auto p-6 lg:p-8">
+          {!isRefreshing && empresas.length === 0 && (
+            <div className="mb-6 bg-white border border-indigo-100 rounded-2xl p-8 text-center shadow-xs">
+              <div className="text-lg font-black text-[#271a82]">Aún no tiene clientes asignados</div>
+              <p className="text-sm text-slate-500 mt-1">Cree su primer cliente para empezar a cargar facturas, extractos y reportes en su propia carpeta.</p>
+              <button onClick={() => setNuevaEmpresaAbierta(true)} className="mt-4 px-5 py-2.5 rounded-xl bg-[#271a82] hover:bg-[#1c1343] text-white text-sm font-bold cursor-pointer">Crear Mi Primer Cliente</button>
+            </div>
+          )}
           {currentSection === 'dashboard' && (
             <DashboardView
               facturas={facturas}
@@ -700,6 +751,7 @@ export default function App() {
               onQuickUpload={handleSeedDemo}
               onOpenBrandCustomizer={() => setIsBrandModalOpen(true)}
               idEmpresa={activeEmpresa?.id_empresa}
+              periodo={filtrosPeriodo}
             />
           )}
 
@@ -708,6 +760,9 @@ export default function App() {
               facturas={facturas}
               cuentasPUC={cuentasPUC}
               activeEmpresa={activeEmpresa}
+              esAdmin={currentUser?.rol === 'Administrador' || currentUser?.rol === 'Desarrollador'}
+              filtros={filtrosPeriodo}
+              onFiltrosChange={setFiltrosPeriodo}
               onRefresh={loadData}
               onShowToast={showToast}
               onUploadXml={handleUploadXml}

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Empresa, Usuario } from '../types/index.ts';
 import { TlmLogo } from './TlmLogo.tsx';
+import { EmpresaSelector, LogoEmpresa } from './EmpresaSelector.tsx';
 
 interface SidebarProps {
   currentSection: string;
@@ -25,6 +26,7 @@ interface SidebarProps {
   activeEmpresa: Empresa | null;
   empresas: Empresa[];
   onSelectEmpresa: (empresa: Empresa) => void;
+  onCrearEmpresa?: () => void;
   pendingInvoicesCount: number;
   customLogoUrl?: string | null;
   currentUser?: Usuario | null;
@@ -54,6 +56,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeEmpresa,
   empresas,
   onSelectEmpresa,
+  onCrearEmpresa,
   pendingInvoicesCount,
   customLogoUrl = null,
   currentUser = null,
@@ -137,30 +140,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 Empresa Activa / Contribuyente
               </label>
             </div>
-            <div className="relative">
-              <select
-                id="empresa-select"
-                value={activeEmpresa?.id_empresa || 1}
-                title={activeEmpresa?.nombre_comercial || 'Seleccionar empresa'}
-                onChange={(e) => {
-                  const emp = empresas.find(item => item.id_empresa === parseInt(e.target.value));
-                  if (emp) onSelectEmpresa(emp);
-                }}
-                style={{ backgroundColor: adjustHex(sidebarColor, 8) }}
-                className="w-full border border-white/20 rounded-xl pl-3 pr-8 py-2 text-xs text-white font-medium focus:outline-none focus:border-[#e64519] transition appearance-none cursor-pointer truncate leading-normal"
-              >
-                {empresas.map((emp, empIdx) => (
-                  <option 
-                    key={`sidebar-emp-${emp.id_empresa}-${emp.nit || empIdx}`} 
-                    value={emp.id_empresa} 
-                    style={{ backgroundColor: sidebarColor, color: '#ffffff' }}
-                  >
-                    {emp.nombre_comercial}
-                  </option>
-                ))}
-              </select>
-              <Building2 className="w-3.5 h-3.5 text-white/70 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            </div>
+            <EmpresaSelector
+              empresas={empresas}
+              activeEmpresa={activeEmpresa}
+              onSelectEmpresa={onSelectEmpresa}
+              onCrearEmpresa={onCrearEmpresa}
+              fondo={adjustHex(sidebarColor, 8)}
+            />
           </div>
         ) : (
           <div 
@@ -168,7 +154,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             style={{ backgroundColor: switcherBg }}
             title={activeEmpresa?.nombre_comercial}
           >
-            <Building2 className="w-5 h-5 text-white/70" />
+            {activeEmpresa ? <LogoEmpresa empresa={activeEmpresa} activa tam="w-8 h-8" /> : <Building2 className="w-5 h-5 text-white/70" />}
           </div>
         )}
 
@@ -216,10 +202,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="bg-black/20 rounded-xl p-2 border border-white/10">
               <div className="flex items-center justify-between mb-0.5">
                 <span className="text-[10px] font-medium text-white/80">Estado Siigo Nube</span>
-                <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                  Conectado
-                </span>
+                {(activeEmpresa as any)?.has_siigo_credentials ? (
+                  <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                    Configurado
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-[10px] font-semibold text-white/50">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white/40"></span>
+                    Sin conexión
+                  </span>
+                )}
               </div>
               <p className="text-[10px] text-white/60 truncate">
                 ERP: {activeEmpresa?.software_erp || 'SIIGO NUBE v1'}

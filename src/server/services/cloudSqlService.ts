@@ -55,6 +55,10 @@ export function mapFacturaRow(r: any): Factura {
     correo: r.correo || undefined,
     banco_siigo: r.bancoSiigo || undefined,
     siigo_id: r.siigoId || undefined,
+    id_medio_pago: r.idMedioPago ?? undefined,
+    id_retencion: r.idRetencion ?? undefined,
+    id_reteica: r.idReteica ?? undefined,
+    id_reteiva: r.idReteiva ?? undefined,
     items: Array.isArray(r.items) ? r.items : undefined,
     datos_ubl: r.datosUbl || undefined,
   };
@@ -198,6 +202,11 @@ export class CloudSqlService {
       `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS siigo_id TEXT`,
       `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS items JSONB`,
       `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS datos_ubl JSONB`,
+      `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS id_medio_pago INTEGER`,
+      `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS id_retencion INTEGER`,
+      `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS id_reteica INTEGER`,
+      `ALTER TABLE facturas ADD COLUMN IF NOT EXISTS id_reteiva INTEGER`,
+      `ALTER TABLE empresas ADD COLUMN IF NOT EXISTS logo_url TEXT`,
       `CREATE INDEX IF NOT EXISTS idx_facturas_empresa_cufe ON facturas (id_empresa, cufe_hash)`,
       `SELECT setval('users_id_seq', (SELECT GREATEST(COALESCE(max(id), 0), 20) FROM users))`,
       `SELECT setval('empresas_id_seq', (SELECT GREATEST(COALESCE(max(id), 0), 10) FROM empresas))`,
@@ -681,6 +690,7 @@ export class CloudSqlService {
         siigo_username: r.siigoUsername || undefined,
         siigo_access_key: r.siigoAccessKey || undefined,
         siigo_document_id: r.siigoDocumentId || 24,
+        logo_url: r.logoUrl || undefined,
       }));
     } catch (error) {
       console.error('[CloudSQL] Error getEmpresas:', error);
@@ -698,6 +708,7 @@ export class CloudSqlService {
         siigoUsername: data.siigo_username || null,
         siigoAccessKey: data.siigo_access_key || null,
         siigoDocumentId: data.siigo_document_id || 24,
+        logoUrl: data.logo_url || null,
       }).returning();
       const r = inserted[0];
       return {
@@ -709,6 +720,7 @@ export class CloudSqlService {
         siigo_username: r.siigoUsername || undefined,
         siigo_access_key: r.siigoAccessKey || undefined,
         siigo_document_id: r.siigoDocumentId || 24,
+        logo_url: r.logoUrl || undefined,
       };
     } catch (error) {
       console.error('[CloudSQL] Error createEmpresa:', error);
@@ -849,7 +861,8 @@ export class CloudSqlService {
             siigoId: prev.siigoId,
             fechaCargue: prev.fechaCargue || valores.fechaCargue,
           }).where(eq(schema.facturas.id, prev.id)).returning();
-          return mapFacturaRow(updated[0]);
+          // Marca interna: la factura ya existía (se cuenta como duplicada en el cargue)
+          return { ...mapFacturaRow(updated[0]), _duplicada: true } as Factura;
         }
       }
 
@@ -876,6 +889,10 @@ export class CloudSqlService {
       if (data.siigo_id !== undefined) updatePayload.siigoId = data.siigo_id;
       if (data.tipo_operacion !== undefined) updatePayload.tipoOperacion = data.tipo_operacion;
       if (data.items !== undefined) updatePayload.items = data.items;
+      if (data.id_medio_pago !== undefined) updatePayload.idMedioPago = data.id_medio_pago;
+      if (data.id_retencion !== undefined) updatePayload.idRetencion = data.id_retencion;
+      if (data.id_reteica !== undefined) updatePayload.idReteica = data.id_reteica;
+      if (data.id_reteiva !== undefined) updatePayload.idReteiva = data.id_reteiva;
       if (Object.keys(updatePayload).length === 0) return null;
 
       const updated = await drizzleDb.update(schema.facturas)
