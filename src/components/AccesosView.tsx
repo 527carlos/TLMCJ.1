@@ -97,7 +97,7 @@ export const AccesosView: React.FC<AccesosViewProps> = ({
 
   // Siigo config state
   const [username, setUsername] = useState(activeEmpresa?.siigo_username || 'automatizaciones@tlm.net.co');
-  const [accessKey, setAccessKey] = useState(activeEmpresa?.siigo_access_key || 'tlm_live_key_99342_secure');
+  const [accessKey, setAccessKey] = useState('');
   const [docId, setDocId] = useState(activeEmpresa?.siigo_document_id || 24);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
