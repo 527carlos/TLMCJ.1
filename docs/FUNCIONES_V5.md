@@ -47,3 +47,15 @@ Esta versión toma las funciones de https://consola-tlm-cloud.onrender.com/ y la
 |---|---|
 | `SIIGO_API_BASE` | Base de la API de Siigo. Por defecto `https://api.siigo.com`. |
 | `SIIGO_PARTNER_ID` | Encabezado `Partner-Id` que exige Siigo. |
+
+## PDF original de los paquetes DIAN
+
+- Al cargar un .zip, el sistema guarda el PDF que trae cada paquete y lo enlaza a su factura por CUFE. También funciona con varios paquetes dentro de un mismo .zip y con un XML y su PDF subidos como archivos sueltos.
+- Cada PDF se empareja con su factura así:
+  1. Mismo nombre de archivo que el XML.
+  2. Si no, el nombre del PDF contiene el número de factura o el inicio del CUFE.
+  3. Si en el paquete quedan un solo XML y un solo PDF sin pareja, se emparejan entre sí.
+- Los PDF se guardan en la tabla `factura_soportes` de PostgreSQL, que es persistente en Render, y en una caché local en `/storage/soportes`.
+- **Ver soporte PDF** muestra el PDF original. El botón del ojo aparece relleno cuando la factura tiene original. Si el paquete no traía PDF, se muestra la representación generada desde el XML con la etiqueta "Representación generada desde el XML".
+- **Exportar → Soportes PDF (ZIP)** incluye los PDF originales. Los que se generan desde el XML llevan el sufijo `_REPRESENTACION_XML`.
+- Las facturas que se cargaron antes de este cambio no tienen PDF guardado. Para guardarlo, basta volver a cargar el mismo .zip: las facturas se reconocen como duplicadas y no se repiten, pero el PDF sí queda guardado.

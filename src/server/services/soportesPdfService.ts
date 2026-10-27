@@ -206,16 +206,21 @@ export function generarPdfFactura(f: Factura, empresa: { nit: string; nombre_com
 
 export async function generarZipSoportes(
   facturas: Factura[],
-  empresa: { nit: string; nombre_comercial: string }
-): Promise<{ buffer: Buffer; cantidad: number; nombres: string[] }> {
+  empresa: { nit: string; nombre_comercial: string },
+  obtenerOriginal?: (f: Factura) => Promise<Buffer | null>
+): Promise<{ buffer: Buffer; cantidad: number; nombres: string[]; originales: number; generados: number }> {
   const zip = new JSZip();
   const nombres: string[] = [];
   let i = 1;
+  let originales = 0;
   for (const f of facturas) {
-    const nombre = nombreSoporte(i++, f);
-    zip.file(nombre, await generarPdfFactura(f, empresa));
+    const original = obtenerOriginal ? await obtenerOriginal(f).catch(() => null) : null;
+    // El PDF original del paquete DIAN se entrega tal cual; si no vino, se genera la representación desde el XML
+    const nombre = original ? nombreSoporte(i++, f) : nombreSoporte(i++, f).replace(/\.pdf$/, '_REPRESENTACION_XML.pdf');
+    zip.file(nombre, original || (await generarPdfFactura(f, empresa)));
+    if (original) originales++;
     nombres.push(nombre);
   }
   const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
-  return { buffer, cantidad: facturas.length, nombres };
+  return { buffer, cantidad: facturas.length, nombres, originales, generados: facturas.length - originales };
 }
