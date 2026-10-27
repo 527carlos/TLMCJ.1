@@ -64,6 +64,8 @@ export interface ParsedXmlInvoice {
   cufe_hash: string;
   estado_revision: 'PENDIENTE' | 'AUDITADA';
   items: LineaUbl[];
+  /** PDF de la representación gráfica que venía en el mismo paquete (.zip) que el XML */
+  pdf_original?: { nombre: string; contenido: Buffer };
   datos_ubl: {
     emisor: ParteUbl;
     adquiriente: ParteUbl;
@@ -72,6 +74,36 @@ export interface ParsedXmlInvoice {
     orden_pedido?: string;
     archivo_origen?: string;
   };
+}
+
+const normalizarNombre = (s: string) => (s || '').toLowerCase().replace(/\.[a-z0-9]+$/, '').replace(/[^a-z0-9]/g, '');
+
+/**
+ * Asigna a cada documento el PDF que le corresponde dentro del mismo paquete:
+ * 1) mismo nombre de archivo que el XML, 2) el nombre del PDF contiene el número de factura o el inicio del CUFE,
+ * 3) si queda un solo PDF y un solo documento sin pareja, se emparejan.
+ */
+export function emparejarPdfs(facturas: ParsedXmlInvoice[], pdfs: { nombre: string; contenido: Buffer }[]): void {
+  if (!facturas.length || !pdfs.length) return;
+  const libres = [...pdfs];
+  const tomar = (i: number) => libres.splice(i, 1)[0];
+
+  for (const f of facturas) {
+    const base = normalizarNombre((f.datos_ubl?.archivo_origen || '').split('/').pop() || '');
+    const i = base ? libres.findIndex(p => normalizarNombre(p.nombre) === base) : -1;
+    if (i >= 0) f.pdf_original = tomar(i);
+  }
+  for (const f of facturas.filter(x => !x.pdf_original)) {
+    const num = normalizarNombre(f.factura_num);
+    const cufe = (f.cufe_hash || '').toLowerCase().substring(0, 16);
+    const i = libres.findIndex(p => {
+      const n = normalizarNombre(p.nombre);
+      return (num.length >= 3 && n.includes(num)) || (cufe.length >= 16 && n.includes(cufe));
+    });
+    if (i >= 0) f.pdf_original = tomar(i);
+  }
+  const sinPdf = facturas.filter(x => !x.pdf_original);
+  if (sinPdf.length === 1 && libres.length === 1) sinPdf[0].pdf_original = tomar(0);
 }
 
 // ==========================================
@@ -233,13 +265,19 @@ export class XmlUblParserService {
     try {
       const zip = await JSZip.loadAsync(zipBuffer);
       const nombres = Object.keys(zip.files).filter(name => !zip.files[name].dir && !name.includes('__MACOSX') && !name.split('/').pop()!.startsWith('.'));
+      // Documentos de este nivel del paquete y sus PDF: se emparejan entre sí (los ZIP internos se emparejan por separado)
+      const propios: ParsedXmlInvoice[] = [];
+      const pdfs: { nombre: string; contenido: Buffer }[] = [];
 
       for (const entryName of nombres) {
         const lower = entryName.toLowerCase();
         try {
           if (lower.endsWith('.xml')) {
             const fileData = await zip.files[entryName].async('nodebuffer');
-            results.push(...this.parseXmlUbl(this.bufferATexto(fileData), entryName, nitEmpresaActiva));
+            propios.push(...this.parseXmlUbl(this.bufferATexto(fileData), entryName, nitEmpresaActiva));
+          } else if (lower.endsWith('.pdf')) {
+            const contenido = await zip.files[entryName].async('nodebuffer');
+            if (contenido.subarray(0, 5).toString('latin1') === '%PDF-') pdfs.push({ nombre: entryName.split('/').pop()!, contenido });
           } else if (lower.endsWith('.zip') && profundidad < 2) {
             const interno = await zip.files[entryName].async('nodebuffer');
             results.push(...(await this.parseZipBuffer(interno, entryName, nitEmpresaActiva, profundidad + 1)));
@@ -248,7 +286,9 @@ export class XmlUblParserService {
           console.warn(`[XML-Parser] Error extrayendo "${entryName}" dentro de ${zipFileName}:`, err);
         }
       }
-      console.log(`[XML-Parser] ZIP "${zipFileName}": ${results.length} documentos UBL extraídos.`);
+      emparejarPdfs(propios, pdfs);
+      results.unshift(...propios);
+      console.log(`[XML-Parser] ZIP "${zipFileName}": ${results.length} documentos UBL extraídos, ${results.filter(r => r.pdf_original).length} con PDF original.`);
     } catch (zipErr) {
       console.error(`[XML-Parser] Error leyendo archivo ZIP ${zipFileName}:`, zipErr);
     }

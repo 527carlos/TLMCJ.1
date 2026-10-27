@@ -314,7 +314,7 @@ export default function App() {
   };
 
   // Actions
-  const handleUploadXml = async (files: FileList): Promise<{ archivos_procesados: number; xmls_extraidos: number; facturas_creadas: number }> => {
+  const handleUploadXml = async (files: FileList): Promise<{ archivos_procesados: number; xmls_extraidos: number; facturas_creadas: number; facturas_duplicadas?: number; facturas_nuevas?: number; pdfs_originales?: number }> => {
     const formData = new FormData();
     formData.append('id_empresa', (activeEmpresa?.id_empresa || 1).toString());
     for (let i = 0; i < files.length; i++) {
@@ -339,7 +339,10 @@ export default function App() {
       return {
         archivos_procesados: Number(data.archivos_procesados || files.length),
         xmls_extraidos: Number(data.xmls_extraidos || data.facturas_creadas || 0),
-        facturas_creadas: Number(data.facturas_creadas || 0)
+        facturas_creadas: Number(data.facturas_creadas || 0),
+        facturas_duplicadas: Number(data.facturas_duplicadas || 0),
+        facturas_nuevas: Number(data.facturas_nuevas ?? data.facturas_creadas ?? 0),
+        pdfs_originales: Number(data.pdfs_originales || 0)
       };
     } catch (err) {
       showToast('Error procesando archivos XML / ZIP.', 'error');

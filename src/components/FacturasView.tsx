@@ -46,7 +46,7 @@ interface FacturasViewProps {
   onRefresh?: () => void;
   onShowToast?: (message: string, type?: 'success' | 'info' | 'error') => void;
   isUploading?: boolean;
-  onUploadXmlWithProgress?: (files: FileList) => Promise<{ archivos_procesados: number; xmls_extraidos: number; facturas_creadas: number; facturas_duplicadas?: number; facturas_nuevas?: number }>;
+  onUploadXmlWithProgress?: (files: FileList) => Promise<{ archivos_procesados: number; xmls_extraidos: number; facturas_creadas: number; facturas_duplicadas?: number; facturas_nuevas?: number; pdfs_originales?: number }>;
 }
 
 const CUENTAS_AVANZADAS: { clave: string; etiqueta: string; defecto: string }[] = [
@@ -99,7 +99,7 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
   const [ocupado, setOcupado] = useState<'' | 'auditoria' | 'erp' | 'pdf' | 'masivo' | 'siigo'>('');
   const [uploading, setUploading] = useState(false);
   const [arrastrando, setArrastrando] = useState(false);
-  const [resultadoCargue, setResultadoCargue] = useState<{ procesados: number; nuevas: number; duplicadas: number } | null>(null);
+  const [resultadoCargue, setResultadoCargue] = useState<{ procesados: number; nuevas: number; duplicadas: number; pdfs: number } | null>(null);
   const [menuExportar, setMenuExportar] = useState(false);
   const inputArchivos = useRef<HTMLInputElement>(null);
 
@@ -120,6 +120,7 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
 
   // ---------------- Visor PDF y ERP ----------------
   const [pdfFactura, setPdfFactura] = useState<Factura | null>(null);
+  const [conPdfOriginal, setConPdfOriginal] = useState<Set<number>>(new Set());
   const [erpAbierto, setErpAbierto] = useState(false);
   const [erpTipo, setErpTipo] = useState(() => leerLocal(`tlm_erp_tipo_${idEmpresa}`, '11'));
   const [erpPrefijo, setErpPrefijo] = useState('');
@@ -138,6 +139,10 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
   };
 
   useEffect(() => { cargarCatalogos(); setSelectedIds([]); setPagina(1); }, [idEmpresa]);
+  useEffect(() => {
+    apiJson<{ ids: number[] }>(`/api/v1/empresas/${idEmpresa}/facturas/soportes-originales`)
+      .then(r => setConPdfOriginal(new Set(r.ids))).catch(() => setConPdfOriginal(new Set()));
+  }, [idEmpresa, facturas]);
   useEffect(() => {
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPdfFactura(null); setErpAbierto(false); setModalSiigo(false); setMenuExportar(false); } };
     document.addEventListener('keydown', esc);
@@ -189,7 +194,7 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
     try {
       if (onUploadXmlWithProgress) {
         const r = await onUploadXmlWithProgress(files);
-        setResultadoCargue({ procesados: r.facturas_creadas, nuevas: r.facturas_nuevas ?? r.facturas_creadas, duplicadas: r.facturas_duplicadas ?? 0 });
+        setResultadoCargue({ procesados: r.facturas_creadas, nuevas: r.facturas_nuevas ?? r.facturas_creadas, duplicadas: r.facturas_duplicadas ?? 0, pdfs: r.pdfs_originales ?? 0 });
       } else {
         onUploadXml(files);
       }
@@ -263,7 +268,9 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
     setOcupado('pdf');
     try {
       const r = await descargarArchivo(`/api/v1/empresas/${idEmpresa}/facturas/soportes-pdf${consultaIds()}`, {}, 'Soportes_PDF.zip');
-      avisar(`Soportes PDF generados (${idsObjetivo().length} documentos)${textoArchivado(r)}.`, r.archivado === 'error' ? 'info' : 'success');
+      const originales = Number(r.encabezados.get('X-TLM-Pdf-Originales') || 0);
+      const generados = Number(r.encabezados.get('X-TLM-Pdf-Generados') || 0);
+      avisar(`Soportes PDF descargados: ${originales} PDF original(es) del .zip${generados ? ` y ${generados} representación(es) generada(s) desde el XML (esas facturas no traían PDF)` : ''}${textoArchivado(r)}.`, r.archivado === 'error' || generados ? 'info' : 'success');
     } catch (err: any) { avisar(err.message, 'error'); } finally { setOcupado(''); }
   };
 
@@ -362,8 +369,8 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
           <UploadCloud className="w-6 h-6 text-[#271a82]" />
           <div>
             <h3 className="font-bold text-slate-800 text-base">Carga Automática de Comprobantes</h3>
-            <p className="text-xs text-slate-500">Soporta paquetes .ZIP o archivos XML UBL 2.1 de la DIAN. <button onClick={() => inputArchivos.current?.click()} className="font-bold text-[#271a82] hover:underline cursor-pointer">Arrastra tus archivos aquí o haz clic para explorar</button>.</p>
-            <input ref={inputArchivos} type="file" multiple accept=".xml,.zip,application/zip,text/xml,application/xml" className="hidden" onChange={e => { subirArchivos(e.target.files); e.target.value = ''; }} />
+            <p className="text-xs text-slate-500">Soporta paquetes .ZIP de la DIAN (XML + PDF) o archivos XML UBL 2.1 con su PDF. <button onClick={() => inputArchivos.current?.click()} className="font-bold text-[#271a82] hover:underline cursor-pointer">Arrastra tus archivos aquí o haz clic para explorar</button>.</p>
+            <input ref={inputArchivos} type="file" multiple accept=".xml,.zip,.pdf,application/zip,text/xml,application/xml,application/pdf" className="hidden" onChange={e => { subirArchivos(e.target.files); e.target.value = ''; }} />
           </div>
           <div className="flex flex-wrap justify-center items-center gap-2">
             <button onClick={() => inputArchivos.current?.click()} disabled={uploading || isUploading} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#271a82] hover:bg-[#1c1343] text-white font-bold text-xs shadow-md cursor-pointer disabled:opacity-60">
@@ -418,6 +425,7 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
           <FileCheck2 className="w-4 h-4 text-emerald-600 shrink-0" />
           <span>Proceso completado: <b>{resultadoCargue.nuevas}</b> facturas nuevas registradas</span>
           <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Duplicadas omitidas: {resultadoCargue.duplicadas}</span>
+          <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800">PDF originales guardados: {resultadoCargue.pdfs}</span>
           <span className="text-emerald-700">Los originales quedaron en la carpeta de la empresa.</span>
           <button onClick={() => setResultadoCargue(null)} className="ml-auto p-1 rounded hover:bg-emerald-100 cursor-pointer"><X className="w-3.5 h-3.5" /></button>
         </div>
@@ -540,7 +548,11 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
                           title={auditada ? 'Auditada (clic para volver a pendiente)' : 'Marcar como auditada'}
                           className={`p-1.5 rounded-lg cursor-pointer ${auditada ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-slate-100 text-slate-400 hover:bg-emerald-50 hover:text-emerald-600'}`}
                         ><CheckCircle2 className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => setPdfFactura(f)} title="Ver soporte PDF" className="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-[#271a82] cursor-pointer"><Eye className="w-3.5 h-3.5" /></button>
+                        <button
+                          onClick={() => setPdfFactura(f)}
+                          title={conPdfOriginal.has(f.id_factura) ? 'Ver el PDF original que venía en el .zip' : 'Ver soporte PDF (representación generada desde el XML: el paquete no traía PDF)'}
+                          className={`p-1.5 rounded-lg cursor-pointer ${conPdfOriginal.has(f.id_factura) ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-indigo-50 hover:bg-indigo-100 text-[#271a82]'}`}
+                        ><Eye className="w-3.5 h-3.5" /></button>
                         <button onClick={() => onDeleteFactura(f.id_factura)} title="Eliminar" className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
                       </div>
                     </td>
@@ -647,13 +659,19 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
         <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4" onClick={() => setPdfFactura(null)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
-              <div className="text-sm font-bold text-slate-800">Visor de comprobante: {pdfFactura.factura_num}</div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="text-sm font-bold text-slate-800 truncate">Soporte de {pdfFactura.factura_num} · {pdfFactura.proveedor}</div>
+                {conPdfOriginal.has(pdfFactura.id_factura)
+                  ? <span className="shrink-0 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold">PDF original del .zip</span>
+                  : <span className="shrink-0 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold" title="El paquete cargado no traía PDF para esta factura">Representación generada desde el XML</span>}
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <a href={`/api/v1/empresas/${pdfFactura.id_empresa}/facturas/${pdfFactura.id_factura}/pdf?descargar=1`} className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:underline"><Download className="w-3.5 h-3.5" /> Descargar PDF</a>
                 <a href={`/api/v1/empresas/${pdfFactura.id_empresa}/facturas/${pdfFactura.id_factura}/pdf`} target="_blank" rel="noreferrer" className="text-[11px] font-bold text-[#271a82] hover:underline">Abrir en otra pestaña</a>
                 <button onClick={() => setPdfFactura(null)} className="p-1 rounded hover:bg-slate-100 cursor-pointer"><X className="w-4 h-4 text-slate-500" /></button>
               </div>
             </div>
-            <iframe title="Soporte PDF" src={`/api/v1/empresas/${pdfFactura.id_empresa}/facturas/${pdfFactura.id_factura}/pdf#toolbar=0`} className="w-full h-[75vh] rounded-b-2xl" />
+            <iframe key={pdfFactura.id_factura} title="Soporte PDF" src={`/api/v1/empresas/${pdfFactura.id_empresa}/facturas/${pdfFactura.id_factura}/pdf`} className="w-full h-[75vh] rounded-b-2xl" />
           </div>
         </div>
       )}

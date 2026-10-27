@@ -2,7 +2,8 @@ import express, { type Request, type Response } from 'express';
 const Router = express.Router;
 import multer from 'multer';
 import { db, getDefaultPermissions } from '../storage/dataStore.ts';
-import { xmlParser } from '../services/xmlUblParser.ts';
+import { xmlParser, emparejarPdfs, type ParsedXmlInvoice } from '../services/xmlUblParser.ts';
+import { SoportesOriginales } from '../services/soportesOriginalesService.ts';
 import { reconciliationEngine } from '../services/reconciliationEngine.ts';
 import { f350TaxEngine } from '../services/f350TaxEngine.ts';
 import { siigoService } from '../services/siigoService.ts';
@@ -1495,9 +1496,18 @@ router.post('/facturas/upload', upload.array('archivos'), async (req: Request, r
   const nitEmpresa = empresaActiva?.nit || '';
   const archivados: { nombre: string; ok: boolean; error?: string }[] = [];
 
+  // PDF originales: los que vienen dentro de cada .zip ya llegan emparejados; los PDF sueltos se emparejan con los XML sueltos
+  const conPdf: ParsedXmlInvoice[] = [];
+  const xmlSueltos: ParsedXmlInvoice[] = [];
+  const pdfsSueltos: { nombre: string; contenido: Buffer }[] = [];
+
   for (const file of files) {
+    const esPdf = file.originalname.toLowerCase().endsWith('.pdf') || file.buffer.subarray(0, 5).toString('latin1') === '%PDF-';
     // Use parseFileBuffer so ZIP archives are unpacked and all inner XMLs are processed
-    const parsedList = await xmlParser.parseFileBuffer(file.buffer, file.originalname, nitEmpresa);
+    const parsedList = esPdf ? [] : await xmlParser.parseFileBuffer(file.buffer, file.originalname, nitEmpresa);
+    if (esPdf) pdfsSueltos.push({ nombre: file.originalname, contenido: file.buffer });
+    else if (!/\.zip$/i.test(file.originalname) && !(file.buffer[0] === 0x50 && file.buffer[1] === 0x4B)) xmlSueltos.push(...parsedList);
+    conPdf.push(...parsedList);
     archivosXmlExtraidos += parsedList.length;
 
     // Conservar el archivo original en el almacenamiento de la empresa (Drive / unidad compartida / local)
@@ -1553,6 +1563,14 @@ router.post('/facturas/upload', upload.array('archivos'), async (req: Request, r
     }
   }
 
+  emparejarPdfs(xmlSueltos.filter(p => !p.pdf_original), pdfsSueltos);
+  let pdfsOriginales = 0;
+  for (const p of conPdf) {
+    if (!p.pdf_original || !p.cufe_hash) continue;
+    await SoportesOriginales.guardar(idEmpresa, p.cufe_hash, p.pdf_original.nombre, p.pdf_original.contenido);
+    pdfsOriginales++;
+  }
+
   let processedFacturas: Factura[] = [];
   try {
     processedFacturas = await CloudSqlService.bulkCreateFacturas(parsedFacturas);
@@ -1605,6 +1623,8 @@ router.post('/facturas/upload', upload.array('archivos'), async (req: Request, r
     facturas_creadas: processedFacturas.length,
     facturas_duplicadas: duplicadasCount,
     facturas_nuevas: processedFacturas.length - duplicadasCount,
+    pdfs_originales: pdfsOriginales,
+    pdfs_sin_pareja: pdfsSueltos.length - xmlSueltos.filter(p => p.pdf_original).length,
     ventas: processedFacturas.filter(f => f.tipo_operacion === 'VENTA').length,
     compras: processedFacturas.filter(f => f.tipo_operacion !== 'VENTA').length,
     archivados,

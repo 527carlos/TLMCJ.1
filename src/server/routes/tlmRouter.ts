@@ -41,6 +41,7 @@ import {
   type Agrupacion
 } from '../services/contabilidadService.ts';
 import { generarZipSoportes, generarPdfFactura } from '../services/soportesPdfService.ts';
+import { SoportesOriginales } from '../services/soportesOriginalesService.ts';
 import { leerAuxiliar, leerExtracto, leerPuc, leerBalance, type LecturaMovimientos } from '../services/lectorArchivosContables.ts';
 import { siigoService, type CredencialesSiigo } from '../services/siigoService.ts';
 import { CATALOGO_RTEFTE, CATALOGO_RTEICA, CATALOGO_RTEIVA, casillaPorTarifa } from '../../shared/catalogosDian.ts';
@@ -334,7 +335,10 @@ router.get('/empresas/:id/facturas/soportes-pdf', conEmpresa, async (req, res) =
   const facturas = await facturasEmpresa(e.id_empresa, parseIds(req.query.ids));
   if (!facturas.length) return res.status(404).json({ detail: 'No hay facturas para generar soportes.' });
   try {
-    const zip = await generarZipSoportes(facturas, e);
+    const zip = await generarZipSoportes(facturas, e, async f => (await SoportesOriginales.obtener(e.id_empresa, f.cufe_hash))?.contenido || null);
+    res.setHeader('X-TLM-Pdf-Originales', String(zip.originales));
+    res.setHeader('X-TLM-Pdf-Generados', String(zip.generados));
+    res.setHeader('Access-Control-Expose-Headers', 'X-TLM-Pdf-Originales, X-TLM-Pdf-Generados');
     await archivarYEnviar(req, res, {
       categoria: 'SOPORTES_PDF',
       nombre: `Soportes_PDF_${e.nit}_${marcaTiempo()}.zip`,
@@ -347,13 +351,25 @@ router.get('/empresas/:id/facturas/soportes-pdf', conEmpresa, async (req, res) =
   }
 });
 
+/** IDs de las facturas que tienen el PDF original del paquete DIAN guardado */
+router.get('/empresas/:id/facturas/soportes-originales', conEmpresa, async (req, res) => {
+  const e = empresaDe(req);
+  const facturas = await facturasEmpresa(e.id_empresa, []);
+  const set = await SoportesOriginales.cufesConPdf(e.id_empresa);
+  res.json({ ids: facturas.filter(f => SoportesOriginales.tiene(set, f.cufe_hash)).map(f => f.id_factura) });
+});
+
+/** Soporte PDF de una factura: el original del .zip si existe; si no, la representación generada desde el XML */
 router.get('/empresas/:id/facturas/:facturaId/pdf', conEmpresa, async (req, res) => {
   const e = empresaDe(req);
   const [f] = await facturasEmpresa(e.id_empresa, [Number(req.params.facturaId)]);
   if (!f) return res.status(404).json({ detail: 'Factura no encontrada en esta empresa.' });
-  const pdf = await generarPdfFactura(f, e);
+  const original = req.query.generado ? null : await SoportesOriginales.obtener(e.id_empresa, f.cufe_hash);
+  const pdf = original?.contenido || (await generarPdfFactura(f, e));
+  const nombre = original ? original.nombre : `${f.factura_num}_representacion_XML.pdf`;
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(`${f.factura_num}.pdf`)}`);
+  res.setHeader('X-TLM-Origen-Pdf', original ? 'ORIGINAL' : 'GENERADO');
+  res.setHeader('Content-Disposition', `${req.query.descargar ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(nombre)}`);
   res.send(pdf);
 });
 
