@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { BANCOS_EXTRACTO } from '../shared/catalogosDian.ts';
 import { Scale, Zap, FileSpreadsheet, FileText, BookOpen, Landmark, AlertTriangle, CheckCircle2, Loader2, X, FilePlus2, Info } from 'lucide-react';
 import { apiJson, descargarArchivo, textoArchivado, formatoCOP } from '../lib/api.ts';
 
@@ -62,7 +63,7 @@ const PARAMETROS_DEFECTO = {
   un_solo_comprobante: false
 };
 
-const BANCOS = ['AUTO', 'DAVIVIENDA', 'BANCOLOMBIA', 'BBVA', 'BANCO DE BOGOTÁ', 'BANCO DE OCCIDENTE', 'BANCO POPULAR', 'AV VILLAS', 'SCOTIABANK COLPATRIA', 'BANCO CAJA SOCIAL', 'ITAÚ', 'NEQUI'];
+const BANCOS = BANCOS_EXTRACTO;
 
 export const ConciliacionView: React.FC<Props> = ({ idEmpresa, nombreEmpresa, onShowToast }) => {
   const avisar = (m: string, t: 'success' | 'info' | 'error' = 'success') => (onShowToast ? onShowToast(m, t) : alert(m));
@@ -79,6 +80,14 @@ export const ConciliacionView: React.FC<Props> = ({ idEmpresa, nombreEmpresa, on
   const [param, setParam] = useState<Record<string, any>>(PARAMETROS_DEFECTO);
   const [errorModal, setErrorModal] = useState('');
   const [ocupado, setOcupado] = useState('');
+  const [textoFiltro, setTextoFiltro] = useState('');
+  const [fechaFiltro, setFechaFiltro] = useState('');
+  const coincide = (fecha: string, ...textos: (string | number | undefined)[]) => {
+    const t = textoFiltro.toLowerCase().trim();
+    const okTexto = !t || textos.some(x => String(x ?? '').toLowerCase().includes(t));
+    const okFecha = !fechaFiltro || (fecha || '').startsWith(fechaFiltro);
+    return okTexto && okFecha;
+  };
 
   useEffect(() => {
     setResultado(null);
@@ -284,6 +293,17 @@ export const ConciliacionView: React.FC<Props> = ({ idEmpresa, nombreEmpresa, on
             </div>
           )}
 
+          {resultado.faltan_en_libros.length === 0 && resultado.faltan_en_banco.length === 0 && (
+            <div className="p-3 rounded-xl bg-emerald-600 text-white text-sm font-black text-center shadow-sm">✓ CONCILIACIÓN PERFECTA (100%): todas las partidas de libros y extracto coinciden.</div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2 bg-white rounded-2xl border border-slate-200 p-3">
+            <span className="text-[10px] font-bold uppercase text-slate-400">Filtrar las tres listas:</span>
+            <input value={textoFiltro} onChange={e => setTextoFiltro(e.target.value)} placeholder="Texto, comprobante, tercero o valor…" className="flex-1 min-w-[200px] bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs" />
+            <input type="date" value={fechaFiltro} onChange={e => setFechaFiltro(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+            <button onClick={() => { setTextoFiltro(''); setFechaFiltro(''); }} className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold cursor-pointer">Limpiar</button>
+          </div>
+
           {/* Tres listas */}
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
             <div className="bg-white rounded-2xl border border-emerald-200 shadow-xs flex flex-col max-h-[560px]">
@@ -295,7 +315,7 @@ export const ConciliacionView: React.FC<Props> = ({ idEmpresa, nombreEmpresa, on
                 <table className="w-full text-[11px]">
                   <thead className="text-slate-400 uppercase text-[9px] sticky top-0 bg-white"><tr><th className="text-left py-2 px-3">Fecha</th><th className="text-left">Comprobante / Detalle</th><th className="text-right px-3">Valor</th></tr></thead>
                   <tbody className="divide-y divide-slate-100">
-                    {resultado.conciliadas.map((c, i) => (
+                    {resultado.conciliadas.filter(c => coincide(c.fecha, c.comprobante, c.detalle, c.descripcion_banco, c.valor)).map((c, i) => (
                       <tr key={i} title={`Banco: ${c.descripcion_banco}${c.diferencia ? ` · diferencia ${formatoCOP(c.diferencia)}` : ''}`}>
                         <td className="py-1.5 px-3 pr-2 font-mono text-emerald-700 whitespace-nowrap">{c.fecha}</td>
                         <td className="py-1.5 truncate max-w-[160px]"><span className="font-mono text-[10px] bg-slate-100 rounded px-1 mr-1">{c.comprobante || '—'}</span>{c.detalle}</td>
@@ -328,7 +348,7 @@ export const ConciliacionView: React.FC<Props> = ({ idEmpresa, nombreEmpresa, on
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {resultado.faltan_en_libros.map(m => (
+                    {resultado.faltan_en_libros.filter(m => coincide(m.fecha, m.descripcion, m.comprobante, m.tercero, m.valor)).map(m => (
                       <tr key={m.id}>
                         <td className="py-1.5 px-3"><input type="checkbox" checked={seleccion.includes(m.id)} onChange={() => setSeleccion(seleccion.includes(m.id) ? seleccion.filter(x => x !== m.id) : [...seleccion, m.id])} /></td>
                         <td className="py-1.5 pr-2 font-mono text-red-700 whitespace-nowrap">{m.fecha}</td>
@@ -351,7 +371,7 @@ export const ConciliacionView: React.FC<Props> = ({ idEmpresa, nombreEmpresa, on
                 <table className="w-full text-[11px]">
                   <thead className="text-slate-400 uppercase text-[9px] sticky top-0 bg-white"><tr><th className="text-left py-2 px-3">Fecha</th><th className="text-left">Comprobante / Descripción</th><th className="text-right px-3">Valor</th></tr></thead>
                   <tbody className="divide-y divide-slate-100">
-                    {resultado.faltan_en_banco.map(m => (
+                    {resultado.faltan_en_banco.filter(m => coincide(m.fecha, m.descripcion, m.comprobante, m.tercero, m.valor)).map(m => (
                       <tr key={m.id}>
                         <td className="py-1.5 px-3 font-mono text-amber-700 whitespace-nowrap">{m.fecha}</td>
                         <td className="py-1.5 truncate max-w-[170px]" title={m.descripcion}><span className="font-mono text-[10px] bg-amber-100 rounded px-1 mr-1">{m.comprobante || '—'}</span>{m.tercero || m.descripcion}</td>

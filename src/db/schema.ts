@@ -29,6 +29,7 @@ export const empresas = pgTable('empresas', {
   siigoUsername: text('siigo_username'),
   siigoAccessKey: text('siigo_access_key'),
   siigoDocumentId: integer('siigo_document_id').default(24),
+  logoUrl: text('logo_url'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -69,6 +70,10 @@ export const facturas = pgTable('facturas', {
   reteivaPorc: numeric('reteiva_porc').default('0'),
   bancoSiigo: text('banco_siigo'),
   siigoId: text('siigo_id'),
+  idMedioPago: integer('id_medio_pago'),
+  idRetencion: integer('id_retencion'),
+  idReteica: integer('id_reteica'),
+  idReteiva: integer('id_reteiva'),
   items: jsonb('items'),
   datosUbl: jsonb('datos_ubl'),
   createdAt: timestamp('created_at').defaultNow(),

@@ -30,6 +30,7 @@ interface DashboardViewProps {
   onQuickUpload: () => void;
   onOpenBrandCustomizer?: () => void;
   idEmpresa?: number;
+  periodo?: { desde: string; hasta: string; tipo: string };
 }
 
 interface ResumenDashboard {
@@ -107,14 +108,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigate,
   onQuickUpload,
   onOpenBrandCustomizer,
-  idEmpresa
+  idEmpresa,
+  periodo
 }) => {
   const [agrupacion, setAgrupacion] = useState<'dia' | 'quincena' | 'mes'>('quincena');
   const [resumen, setResumen] = useState<ResumenDashboard | null>(null);
   useEffect(() => {
     if (!idEmpresa) return;
-    apiJson<ResumenDashboard>(`/api/v1/empresas/${idEmpresa}/dashboard?agrupacion=${agrupacion}`).then(setResumen).catch(() => setResumen(null));
-  }, [idEmpresa, agrupacion, facturas.length]);
+    apiJson<ResumenDashboard>(`/api/v1/empresas/${idEmpresa}/dashboard?agrupacion=${agrupacion}&desde=${periodo?.desde || ''}&hasta=${periodo?.hasta || ''}&tipo=${periodo?.tipo || 'TODOS'}`).then(setResumen).catch(() => setResumen(null));
+  }, [idEmpresa, agrupacion, facturas.length, periodo?.desde, periodo?.hasta, periodo?.tipo]);
 
   const formatCOP = (num: number) => {
     return new Intl.NumberFormat('es-CO', {

@@ -42,6 +42,9 @@ import {
 } from '../services/contabilidadService.ts';
 import { generarZipSoportes, generarPdfFactura } from '../services/soportesPdfService.ts';
 import { leerAuxiliar, leerExtracto, leerPuc, leerBalance, type LecturaMovimientos } from '../services/lectorArchivosContables.ts';
+import { siigoService, type CredencialesSiigo } from '../services/siigoService.ts';
+import { CATALOGO_RTEFTE, CATALOGO_RTEICA, CATALOGO_RTEIVA, casillaPorTarifa } from '../../shared/catalogosDian.ts';
+import * as XLSX from 'xlsx';
 
 const router = express.Router();
 const upload = multer({ limits: { fileSize: 80 * 1024 * 1024 } });
@@ -134,6 +137,18 @@ const periodoDeFacturas = (facturas: Factura[]) => {
   const fechas = facturas.map(f => f.fecha).filter(f => /^\d{4}-\d{2}/.test(f)).sort();
   return fechas.length ? fechas[fechas.length - 1].substring(0, 7) : periodoActual();
 };
+
+/** Filtros compartidos de periodo y tipo (?desde=AAAA-MM-DD&hasta=AAAA-MM-DD&tipo=VENTA|COMPRA) */
+function filtrarPeriodo(lista: Factura[], req: Request): Factura[] {
+  const desde = String(req.query.desde || '');
+  const hasta = String(req.query.hasta || '');
+  const tipo = String(req.query.tipo || '').toUpperCase();
+  return lista.filter(f =>
+    (!desde || (f.fecha || '') >= desde) &&
+    (!hasta || (f.fecha || '') <= hasta) &&
+    (!['VENTA', 'COMPRA'].includes(tipo) || (f.tipo_operacion || 'COMPRA') === tipo)
+  );
+}
 
 const marcaTiempo = () => new Date().toISOString().replace(/[:T]/g, '-').substring(0, 16);
 
@@ -360,8 +375,13 @@ router.patch('/empresas/:id/facturas/masivo', conEmpresa, async (req, res) => {
     if (campos.retencion_porc !== undefined) {
       cambios.retencion_porc = Number(campos.retencion_porc);
       cambios.retencion_valor = Math.round((Math.abs(f.subtotal) * cambios.retencion_porc) / 100) * Math.sign(f.subtotal || 1);
-      if (campos.casilla_350 !== undefined) cambios.casilla_350 = Number(campos.casilla_350);
+      cambios.casilla_350 = campos.casilla_350 !== undefined ? Number(campos.casilla_350) : casillaPorTarifa(cambios.retencion_porc);
     }
+    const idSiigo = (v: unknown) => (v === null || v === '' ? null : Number.isInteger(Number(v)) ? Number(v) : null);
+    if (campos.id_medio_pago !== undefined) cambios.id_medio_pago = idSiigo(campos.id_medio_pago) as any;
+    if (campos.id_retencion !== undefined) cambios.id_retencion = idSiigo(campos.id_retencion) as any;
+    if (campos.id_reteica !== undefined) cambios.id_reteica = idSiigo(campos.id_reteica) as any;
+    if (campos.id_reteiva !== undefined) cambios.id_reteiva = idSiigo(campos.id_reteiva) as any;
     await CloudSqlService.updateFactura(f.id_factura, cambios).catch(() => null);
     const local = db.facturas.find(x => x.id_factura === f.id_factura);
     if (local) Object.assign(local, cambios);
@@ -376,8 +396,91 @@ router.patch('/empresas/:id/facturas/masivo', conEmpresa, async (req, res) => {
 // ==========================================
 router.get('/empresas/:id/dashboard', conEmpresa, async (req, res) => {
   const agr = (['dia', 'quincena', 'mes'].includes(String(req.query.agrupacion)) ? req.query.agrupacion : 'quincena') as Agrupacion;
-  const facturas = await facturasEmpresa(empresaDe(req).id_empresa);
-  res.json(resumenDashboard(facturas, agr));
+  res.json(resumenDashboard(filtrarPeriodo(await facturasEmpresa(empresaDe(req).id_empresa), req), agr));
+});
+
+// ==========================================
+// 3b. SIIGO NUBE (credenciales por empresa)
+// ==========================================
+const credencialesDe = (e: Empresa): CredencialesSiigo | null =>
+  e.siigo_username && e.siigo_access_key ? { username: e.siigo_username, access_key: e.siigo_access_key } : null;
+
+/** Catálogos para los desplegables: los de Siigo si la empresa está conectada, o el catálogo DIAN contingente. */
+router.get('/empresas/:id/siigo/catalogos', conEmpresa, async (req, res) => {
+  const e = empresaDe(req);
+  const cred = credencialesDe(e);
+  const contingencia = {
+    configurado: Boolean(cred),
+    conectado: false,
+    fuente: 'CONTINGENCIA_DIAN' as const,
+    medios_pago: [] as { id: number; name: string }[],
+    retefuente: CATALOGO_RTEFTE.map(t => ({ id: t.id, name: t.nombre, percentage: t.porcentaje })),
+    reteica: CATALOGO_RTEICA.map(t => ({ id: t.id, name: t.nombre, percentage: t.porcentaje })),
+    reteiva: CATALOGO_RTEIVA.map(t => ({ id: t.id, name: t.nombre, percentage: t.porcentaje })),
+    document_id: e.siigo_document_id || 24
+  };
+  if (!cred) return res.json(contingencia);
+  try {
+    const { impuestos, medios } = await siigoService.catalogos(cred, req.query.refrescar === '1');
+    const c = siigoService.clasificarImpuestos(impuestos);
+    res.json({
+      ...contingencia,
+      conectado: true,
+      fuente: 'SIIGO',
+      medios_pago: medios,
+      retefuente: c.retefuente,
+      reteica: c.reteica,
+      reteiva: c.reteiva,
+      iva: c.iva
+    });
+  } catch (err: any) {
+    res.json({ ...contingencia, error: err.message });
+  }
+});
+
+/** Transmite facturas de compra a Siigo y devuelve un informe por factura (también archivado en Excel). */
+router.post('/empresas/:id/siigo/enviar', conEmpresa, async (req, res) => {
+  const e = empresaDe(req);
+  const cred = credencialesDe(e);
+  if (!cred) return res.status(400).json({ detail: 'Configure primero las credenciales de Siigo de esta empresa (Config. Siigo).' });
+  const ids = parseIds(req.body?.ids);
+  if (!ids.length) return res.status(400).json({ detail: 'Seleccione al menos una factura.' });
+  const facturas = await facturasEmpresa(e.id_empresa, ids);
+  const documentId = Number(req.body?.document_id) || e.siigo_document_id || 24;
+  const medioPorDefecto = req.body?.id_medio_pago ? Number(req.body.id_medio_pago) : null;
+
+  const reporte = [];
+  for (const f of facturas) {
+    const r = await siigoService.enviarCompra(cred, f, { documentId, medioPagoId: f.id_medio_pago || medioPorDefecto });
+    if (r.status === 'success') {
+      const cambios: Partial<Factura> = { estado_revision: 'SINCRONIZADA_SIIGO', siigo_id: String(r.siigo_nombre || r.siigo_id || '') };
+      await CloudSqlService.updateFactura(f.id_factura, cambios).catch(() => null);
+      const local = db.facturas.find(x => x.id_factura === f.id_factura);
+      if (local) Object.assign(local, cambios);
+    }
+    const { payloadSent, ...sinPayload } = r;
+    reporte.push(sinPayload);
+  }
+  db.saveToDisk();
+
+  const exitosas = reporte.filter(r => r.status === 'success').length;
+  const fallidas = reporte.filter(r => r.status === 'error').length;
+  const omitidas = reporte.filter(r => r.status === 'omitida').length;
+
+  // Informe en Excel archivado en la carpeta de la empresa
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(reporte.map(r => ({
+    'Factura N°': r.factura_num, 'NIT Tercero': r.nit_tercero, Proveedor: r.proveedor,
+    Estado: r.status === 'success' ? 'EXITOSA' : r.status === 'omitida' ? 'OMITIDA' : 'FALLIDA',
+    'Documento Siigo': r.siigo_nombre || r.siigo_id || '', Detalle: r.mensaje
+  }))), 'Transmisión Siigo');
+  const informe = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  const archivo = await EmpresaStorageService.archivar({
+    empresa: refEmpresa(e), categoria: 'EXPORTES_ERP', nombre: `Informe_Transmision_Siigo_${marcaTiempo()}.xlsx`,
+    contenido: informe, mime: MIME_XLSX, periodo: periodoDeFacturas(facturas), usuario: nombreUsuario(req)
+  });
+
+  res.json({ exitosas, fallidas, omitidas, reporte_detalle: reporte, informe_xlsx_b64: informe.toString('base64'), archivado: archivo.ok && !archivo.omitido });
 });
 
 // ==========================================

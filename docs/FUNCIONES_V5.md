@@ -1,0 +1,49 @@
+# Consola TLM v5: paridad con Consola TLM Cloud
+
+Esta versión toma las funciones de https://consola-tlm-cloud.onrender.com/ y las suma a lo que ya traía la v4. Todo sigue separado por empresa.
+
+## Siigo Nube (integración real)
+
+- `src/server/services/siigoService.ts` se autentica contra `POST https://api.siigo.com/auth` con el usuario y la access key de cada empresa. Guarda el token en caché y lo renueva cuando Siigo responde 401.
+- **Config. Siigo** (en Cargue & Auditoría) prueba las credenciales en vivo antes de guardarlas. Si la llave se deja vacía, se conserva la que ya estaba guardada.
+- `GET /api/v1/empresas/:id/siigo/catalogos` trae de Siigo los medios de pago (`/v1/payment-types`) y los impuestos (`/v1/taxes`), clasificados en ReteFuente, ReteICA y ReteIVA. Si la empresa no tiene Siigo configurado o Siigo no responde, usa el catálogo contingente DIAN de `src/shared/catalogosDian.ts`.
+- `POST /api/v1/empresas/:id/siigo/enviar` crea las facturas de compra en Siigo (`POST /v1/purchases`) con el medio de pago y las retenciones elegidas en cada fila:
+  - Omite las ventas y las facturas ya sincronizadas.
+  - Devuelve exitosas, fallidas y la novedad de cada factura.
+  - Genera un informe Excel que se archiva en la carpeta EXPORTES_ERP de la empresa.
+- El botón **Enviar a SIIGO** se ve verde cuando la empresa está configurada y gris "(Sin conexión)" cuando no.
+
+## Cargue & Auditoría
+
+- Zona de arrastrar y soltar para paquetes .ZIP o archivos XML. Al terminar muestra cuántas facturas son nuevas y cuántas duplicadas se omitieron (se detectan por CUFE dentro de la misma empresa).
+- La tabla muestra Cant., V. Unitario, Subtotal, IVA, Medio de pago, Cuenta contable y RteFte, RteICA y RteIVA en selectores por fila. En las ventas no se muestran retenciones.
+- Al elegir una ReteFuente se asigna sola la casilla del F350: 61 para honorarios, 62 para servicios y 64 para compras.
+- Junto a la cuenta contable hay un botón para copiarla. Si hay filtros activos, la cuenta se copia a las facturas filtradas; si no, a todas las facturas del mismo NIT. En ambos casos esas facturas quedan auditadas.
+- Cada fila tiene su propio botón de auditoría, y las filas auditadas se resaltan en verde. También se puede auditar o devolver a pendiente en lote.
+- Barra de asignación en lote para Banco o medio de pago, RteFte, RteICA y RteIVA.
+- Filtros por periodo (desde y hasta) y por tipo (todas, compras o ventas). Los mismos filtros se aplican al Dashboard y al Formulario 350.
+- Paginación de 25, 50 o 100 filas, o todas.
+- Menú **Exportar** con Auditoría Excel, Plantilla ERP (Siigo) y Soportes PDF (ZIP).
+- Visor de PDF dentro de la aplicación. Los modales se cierran con ESC.
+- Borrar las facturas seleccionadas y **Vaciar todo** (`DELETE /api/v1/facturas/limpiar-todo?id_empresa=`). Vaciar todo solo lo puede usar un Administrador.
+
+## Empresas por usuario
+
+- `GET /api/v1/empresas` solo devuelve a cada usuario las empresas de su `empresas_ids`; los administradores ven todas. El cliente envía el encabezado `x-tlm-user-id`.
+- Selector de cliente con búsqueda, logo o iniciales y NIT. Pide confirmación antes de cambiar de cliente y recuerda el último cliente usado.
+- **Crear cliente** pide razón social, NIT, logo y ERP de destino. Quien lo crea queda asignado al cliente. Si el NIT ya existe, el servidor responde 409.
+- Cuando el usuario no tiene clientes se muestra un aviso con el botón "Crear Mi Primer Cliente".
+- El estado de Siigo en la barra lateral refleja si la empresa activa tiene credenciales.
+
+## Conciliación y Centro Fiscal
+
+- Un filtro por texto y por fecha se aplica a las tres listas de la conciliación (conciliadas, faltan en libros y faltan en banco). Cuando no quedan pendientes aparece el aviso "✓ CONCILIACIÓN PERFECTA (100%)".
+- Se agregaron los bancos Banco Caja Social y Global66.
+- El F350 (`/api/v1/impuestos/f350?desde=&hasta=`) solo toma las compras del periodo, arma la etiqueta del periodo con las fechas e incluye ReteICA y ReteIVA en los totales.
+
+## Variables de entorno nuevas
+
+| Variable | Uso |
+|---|---|
+| `SIIGO_API_BASE` | Base de la API de Siigo. Por defecto `https://api.siigo.com`. |
+| `SIIGO_PARTNER_ID` | Encabezado `Partner-Id` que exige Siigo. |

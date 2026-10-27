@@ -15,7 +15,19 @@ export class F350TaxEngineService {
   /**
    * Generates DIAN Formulario 350 tax liquidation for withholding taxes (Retención en la Fuente).
    */
-  public calculateF350(facturas: Factura[]): F350TaxLiquidationResult {
+  public calculateF350(todas: Factura[], filtro: { desde?: string; hasta?: string } = {}): F350TaxLiquidationResult {
+    // Solo compras (las ventas no generan retenciones practicadas por la empresa) y dentro del periodo
+    const facturas = todas.filter(f =>
+      f.tipo_operacion !== 'VENTA' &&
+      (!filtro.desde || (f.fecha || '') >= filtro.desde) &&
+      (!filtro.hasta || (f.fecha || '') <= filtro.hasta)
+    );
+    const fechas = facturas.map(f => f.fecha).filter(x => /^\d{4}-\d{2}/.test(x || '')).sort();
+    const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    const etiquetaMes = (iso: string) => `${MESES[Number(iso.substring(5, 7)) - 1]} ${iso.substring(0, 4)}`;
+    const inicio = filtro.desde || fechas[0];
+    const fin = filtro.hasta || fechas[fechas.length - 1];
+    const periodo = !inicio ? 'Sin facturas de compra' : inicio.substring(0, 7) === (fin || inicio).substring(0, 7) ? etiquetaMes(inicio) : `${etiquetaMes(inicio)} – ${etiquetaMes(fin || inicio)}`;
     const casillaMap = new Map<number, {
       concepto: string;
       base: number;
@@ -37,7 +49,7 @@ export class F350TaxEngineService {
     let totalReteIca = 0;
 
     for (const f of facturas) {
-      if (f.tipo_comprobante === 'NOTA_CREDITO') continue;
+      if (/nota/i.test(f.tipo_comprobante || '')) continue;
 
       const subtotal = f.subtotal || 0;
       const cNum = f.casilla_350 || 64;
@@ -94,8 +106,8 @@ export class F350TaxEngineService {
     casillasResult.sort((a, b) => a.casilla - b.casilla);
 
     return {
-      periodo: "Marzo 2026",
-      anoGravable: 2026,
+      periodo,
+      anoGravable: Number((fin || inicio || new Date().toISOString()).substring(0, 4)),
       totalBasesGravables: Math.round(totalBases),
       totalRetenciones: Math.round(totalRet),
       totalReteIva: Math.round(totalReteIva),
