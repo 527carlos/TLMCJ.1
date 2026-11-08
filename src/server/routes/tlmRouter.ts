@@ -516,8 +516,7 @@ router.post('/empresas/:id/siigo/enviar', conEmpresa, async (req, res) => {
       const local = db.facturas.find(x => x.id_factura === f.id_factura);
       if (local) Object.assign(local, cambios);
     }
-    const { payloadSent, ...sinPayload } = r;
-    reporte.push(sinPayload);
+    reporte.push(r);
   }
   db.saveToDisk();
 
@@ -530,7 +529,10 @@ router.post('/empresas/:id/siigo/enviar', conEmpresa, async (req, res) => {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(reporte.map(r => ({
     'Factura N°': r.factura_num, 'NIT Tercero': r.nit_tercero, Proveedor: r.proveedor,
     Estado: r.status === 'success' ? 'EXITOSA' : r.status === 'omitida' ? 'OMITIDA' : 'FALLIDA',
-    'Documento Siigo': r.siigo_nombre || r.siigo_id || '', Detalle: r.mensaje
+    'Documento Siigo': r.siigo_nombre || r.siigo_id || '', Detalle: r.mensaje,
+    // JSON exacto que se envió a Siigo, para revisar qué campo rechazó
+    'Payload enviado': r.payloadSent ? JSON.stringify(r.payloadSent) : '',
+    'Respuesta de Siigo': r.detalle_siigo ? JSON.stringify(r.detalle_siigo) : ''
   }))), 'Transmisión Siigo');
   const informe = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
   const archivo = await EmpresaStorageService.archivar({
