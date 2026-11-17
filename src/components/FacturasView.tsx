@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Factura, CuentaPUC, Empresa } from '../types/index.ts';
 import {
   UploadCloud, Search, FileCheck2, Trash2, Send, FileSpreadsheet, Eye, Sparkles, CheckSquare, Square,
@@ -82,8 +82,26 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
   onUploadXml, onSeedDemo, onImportFromDrive, onUpdateFactura, onDeleteFactura, onBulkDelete, onClearAll,
   onInspectCufe, onRefresh, onShowToast, isUploading = false, onUploadXmlWithProgress
 }) => {
+  const alternarLineas = (idFactura: number) =>
+    setLineasAbiertas(prev => (prev.includes(idFactura) ? prev.filter(x => x !== idFactura) : [...prev, idFactura]));
+
+  // Guarda cuenta o centro de costo de una sola línea
+  const guardarLinea = async (f: Factura, linea: number, cambios: Record<string, unknown>) => {
+    try {
+      await apiJson(`/api/v1/facturas/${f.id_factura}/lineas/${linea}`, { method: 'PATCH', body: JSON.stringify(cambios) });
+      onRefresh?.();
+    } catch (err: any) { avisar(err.message, 'error'); }
+  };
+
   const avisar = (m: string, t: 'success' | 'info' | 'error' = 'success') => (onShowToast ? onShowToast(m, t) : alert(m));
   const idEmpresa = activeEmpresa?.id_empresa || 1;
+
+  useEffect(() => {
+    apiJson<any>(`/api/v1/empresas/${idEmpresa}/siigo/centros-costo`)
+      .then(r => setCentrosCC({ conectado: !!r.conectado, centros: r.centros || [], mensaje: r.mensaje || null }))
+      .catch(() => setCentrosCC({ conectado: false, centros: [], mensaje: 'No se pudieron cargar los centros de costo.' }));
+  }, [idEmpresa]);
+
 
   // ---------------- Filtros ----------------
   const [filtrosLocal, setFiltrosLocal] = useState<FiltrosPeriodo>({ desde: '', hasta: '', tipo: 'TODOS' });
@@ -94,6 +112,9 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
   const [tamPagina, setTamPagina] = useState<number | 'all'>(25);
   const [pagina, setPagina] = useState(1);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  // Líneas desplegadas por factura y centros de costo de Siigo de la empresa activa
+  const [lineasAbiertas, setLineasAbiertas] = useState<number[]>([]);
+  const [centrosCC, setCentrosCC] = useState<{ conectado: boolean; centros: { id: number; codigo: string; nombre: string }[]; mensaje: string | null }>({ conectado: false, centros: [], mensaje: null });
 
   // ---------------- Estado de procesos ----------------
   const [ocupado, setOcupado] = useState<'' | 'auditoria' | 'erp' | 'pdf' | 'masivo' | 'siigo'>('');
@@ -535,8 +556,10 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
                 const sel = selectedIds.includes(f.id_factura);
                 const esVenta = f.tipo_operacion === 'VENTA';
                 const auditada = f.estado_revision === 'AUDITADA' || f.estado_revision === 'SINCRONIZADA_SIIGO';
+                const expandida = lineasAbiertas.includes(f.id_factura);
                 return (
-                  <tr key={f.id_factura} className={`transition ${auditada ? 'bg-emerald-50/70 hover:bg-emerald-100/70 border-l-4 border-l-emerald-500' : sel ? 'bg-indigo-50/40' : 'hover:bg-slate-50/70'}`}>
+                  <Fragment key={f.id_factura}>
+                  <tr className={`transition ${auditada ? 'bg-emerald-50/70 hover:bg-emerald-100/70 border-l-4 border-l-emerald-500' : sel ? 'bg-indigo-50/40' : 'hover:bg-slate-50/70'}`}>
                     <td className="py-2.5 px-3 text-center">
                       <button onClick={() => toggleSelectOne(f.id_factura)} className="cursor-pointer">{sel ? <CheckSquare className="w-4 h-4 text-[#271A82]" /> : <Square className="w-4 h-4 text-slate-300" />}</button>
                     </td>
@@ -569,7 +592,7 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
                     </td>
                     <td className="py-2.5 px-2 max-w-[190px]">
                       <div className="text-slate-700 truncate" title={(f.items || []).map(i => `${i.descripcion_item} × ${i.cantidad}`).join('\n') || f.descripcion_item}>{f.descripcion_item}</div>
-                      <div className="text-[10px] text-slate-400">{f.items?.length || 1} línea(s)</div>
+                      <button onClick={() => alternarLineas(f.id_factura)} className="text-[10px] font-bold text-[#271a82] hover:underline cursor-pointer">{lineasAbiertas.includes(f.id_factura) ? "▾" : "▸"} {f.items?.length || 1} línea(s)</button>
                     </td>
                     <td className="py-2.5 px-2 text-right font-mono">{f.cantidad}</td>
                     <td className="py-2.5 px-2 text-right font-mono whitespace-nowrap">{formatCOP(f.valor_unitario)}</td>
@@ -632,6 +655,53 @@ export const FacturasView: React.FC<FacturasViewProps> = ({
                       </>
                     )}
                   </tr>
+                  {expandida && (
+                    <tr className="bg-slate-50/80">
+                      <td colSpan={15} className="px-6 py-3">
+                        <div className="text-[11px] font-bold text-slate-600 mb-2">Líneas de {f.factura_num}: asigne la cuenta contable y el centro de costo de cada una</div>
+                        {!cuentasPUC.length && <div className="text-[11px] text-amber-700 mb-2">Esta empresa no tiene plan de cuentas cargado. Cárguelo en Cerebro Contable PUC.</div>}
+                        {centrosCC.mensaje && <div className="text-[11px] text-amber-700 mb-2">{centrosCC.mensaje}</div>}
+                        <div className="overflow-x-auto"><table className="min-w-[780px] w-full text-[11px] bg-white border border-slate-200 rounded-lg">
+                          <thead className="text-slate-400 uppercase text-[9px]">
+                            <tr><th className="text-left px-2 py-1">Línea</th><th className="text-left">Descripción</th><th className="text-right">Cant.</th><th className="text-right">Subtotal</th><th className="text-right pr-6">IVA</th><th className="text-left pl-6">Cuenta contable</th><th className="text-left pl-4">Centro de costo</th></tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {(f.items || []).map(i => (
+                              <tr key={i.linea}>
+                                <td className="px-2 py-1.5 font-mono text-slate-500">{i.linea}</td>
+                                <td className="py-1.5 pr-2 text-slate-700">{i.descripcion_item}</td>
+                                <td className="py-1.5 text-right font-mono">{i.cantidad}</td>
+                                <td className="py-1.5 text-right font-semibold whitespace-nowrap">{formatCOP(i.subtotal)}</td>
+                                <td className="py-1.5 pr-6 text-right text-emerald-700 whitespace-nowrap">{formatCOP(i.iva)}</td>
+                                <td className="py-1.5 pl-6 pr-2">
+                                  <input
+                                    key={`lc-${f.id_factura}-${i.linea}-${i.cuenta_contable || ''}`}
+                                    defaultValue={i.cuenta_contable || ''}
+                                    placeholder={f.cuenta_gasto}
+                                    list="lista-puc"
+                                    onBlur={e => { const v = e.target.value.replace(/[^\d]/g, ''); if (v !== (i.cuenta_contable || '')) guardarLinea(f, i.linea, { cuenta_contable: v }); }}
+                                    className="w-28 border border-slate-200 rounded px-1.5 py-1 font-mono font-bold text-[#271a82]"
+                                  />
+                                </td>
+                                <td className="py-1.5 pl-4">
+                                  <select
+                                    value={i.centro_costo?.id ?? ''}
+                                    disabled={!centrosCC.centros.length}
+                                    onChange={e => { const c = centrosCC.centros.find(x => String(x.id) === e.target.value); guardarLinea(f, i.linea, { centro_costo: c ?? null }); }}
+                                    className="border border-slate-200 rounded px-1 py-1 max-w-[240px] disabled:opacity-60"
+                                  >
+                                    <option value="">Sin centro de costo</option>
+                                    {centrosCC.centros.map(c => <option key={c.id} value={c.id}>{c.codigo} · {c.nombre}</option>)}
+                                  </select>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table></div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>

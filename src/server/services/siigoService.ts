@@ -34,6 +34,12 @@ export interface MedioPagoSiigo {
   active?: boolean;
 }
 
+export interface CentroCostoSiigo {
+  id: number;
+  codigo: string;
+  nombre: string;
+}
+
 export interface SiigoSyncResponse {
   status: 'success' | 'error' | 'omitida';
   factura_num: string;
@@ -143,6 +149,27 @@ export class SiigoService {
     return limpio;
   }
 
+  /**
+   * Centros de costo de la empresa en Siigo. Cada empresa tiene su propia cuenta de Siigo,
+   * así que la caché y las credenciales son por empresa.
+   */
+  private centrosCache: Map<string, { centros: CentroCostoSiigo[]; at: number }> = new Map();
+
+  public async centrosCosto(cred: CredencialesSiigo, forzar = false): Promise<CentroCostoSiigo[]> {
+    const clave = cred.username;
+    const cache = this.centrosCache.get(clave);
+    if (!forzar && cache && Date.now() - cache.at < 10 * 60_000) return cache.centros;
+    const datos: any = await this.llamar(cred, 'GET', '/v1/cost-centers');
+    // Siigo puede responder una lista directa o un objeto con la lista en `results`
+    const lista: any[] = Array.isArray(datos) ? datos : Array.isArray(datos?.results) ? datos.results : [];
+    const centros = lista
+      .filter(c => c && c.active !== false)
+      .map(c => ({ id: Number(c.id), codigo: String(c.code ?? c.id), nombre: String(c.name ?? c.code ?? c.id) }))
+      .filter(c => Number.isFinite(c.id));
+    this.centrosCache.set(clave, { centros, at: Date.now() });
+    return centros;
+  }
+
   /** Clasifica los impuestos de Siigo por tipo para los desplegables. */
   public clasificarImpuestos(impuestos: ImpuestoSiigo[]) {
     const t = (x: ImpuestoSiigo) => `${x.type} ${x.name}`.toLowerCase();
@@ -189,6 +216,8 @@ export class SiigoService {
       return {
         type: 'Account',
         code: l.cuenta_contable || f.cuenta_gasto,
+        // Centro de costo de la línea (id de Siigo), si se asignó
+        ...(l.centro_costo?.id ? { cost_center: l.centro_costo.id } : {}),
         description: String(l.descripcion_item || f.descripcion_item || 'Compra').substring(0, 100),
         quantity: cantidad,
         price: Math.round(((Number(l.subtotal) || 0) / cantidad) * 100) / 100,

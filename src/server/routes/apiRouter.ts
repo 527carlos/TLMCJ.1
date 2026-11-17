@@ -15,7 +15,7 @@ import { SqlGeneratorService } from '../services/sqlGeneratorService.ts';
 import { CloudSqlService } from '../services/cloudSqlService.ts';
 import { reconnectPool, getActiveConnectionConfig, parseConnectionString } from '../../db/index.ts';
 import { EmpresaStorageService } from '../services/empresaStorageService.ts';
-import type { Factura } from '../domain/types.ts';
+import type { Factura, FacturaItem } from '../domain/types.ts';
 
 const router = Router();
 
@@ -1842,9 +1842,23 @@ router.patch('/facturas/:id/estado', async (req: Request, res: Response) => {
   }
 });
 
+// Una cuenta solo es válida si existe en el plan de cuentas de la empresa de la factura
+async function cuentaEnPlanDeEmpresa(idEmpresa: number, cuenta: string): Promise<{ ok: boolean; motivo?: string }> {
+  const plan = await CloudSqlService.getCuentasPuc(idEmpresa).catch(() => []);
+  const lista = plan.length ? plan : db.cuentasPUC.filter(c => c.id_empresa === idEmpresa);
+  if (!lista.length) return { ok: false, motivo: 'Esta empresa no tiene plan de cuentas cargado. Cárguelo en Cerebro Contable PUC.' };
+  if (!lista.some(c => c.cuenta === cuenta)) return { ok: false, motivo: `La cuenta ${cuenta} no existe en el plan de cuentas de esta empresa.` };
+  return { ok: true };
+}
+
 router.patch('/facturas/:id/cuenta', async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
   const { cuenta_gasto, autor_nombre, autor_id } = req.body;
+  const facturaActual = db.facturas.find(f => f.id_factura === id);
+  if (facturaActual && cuenta_gasto) {
+    const validacion = await cuentaEnPlanDeEmpresa(facturaActual.id_empresa, String(cuenta_gasto));
+    if (!validacion.ok) return res.status(400).json({ detail: validacion.motivo });
+  }
   try {
     const updated = await CloudSqlService.updateFactura(id, { cuenta_gasto });
     const fLocal = db.facturas.find(fact => fact.id_factura === id);
@@ -1861,6 +1875,56 @@ router.patch('/facturas/:id/cuenta', async (req: Request, res: Response) => {
     res.json(updated || fLocal);
   } catch (err: any) {
     res.status(500).json({ detail: "Error actualizando cuenta en Cloud SQL: " + err.message });
+  }
+});
+
+// Cuenta contable y centro de costo de UNA línea de la factura.
+// cuenta_contable: "" la quita (la línea usa la cuenta de la factura). centro_costo: null la quita.
+router.patch('/facturas/:id/lineas/:linea', async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const numLinea = parseInt(req.params.linea);
+  const { cuenta_contable, centro_costo } = req.body;
+  const factura = db.facturas.find(f => f.id_factura === id);
+  if (!factura) return res.status(404).json({ detail: "Factura no encontrada." });
+  const linea = (factura.items || []).find(i => i.linea === numLinea);
+  if (!linea) return res.status(404).json({ detail: `La factura no tiene la línea ${numLinea}.` });
+
+  const cambios: Partial<FacturaItem> = {};
+  if (cuenta_contable !== undefined) {
+    const cuenta = String(cuenta_contable || '').trim();
+    if (cuenta) {
+      const validacion = await cuentaEnPlanDeEmpresa(factura.id_empresa, cuenta);
+      if (!validacion.ok) return res.status(400).json({ detail: validacion.motivo });
+      cambios.cuenta_contable = cuenta;
+    } else {
+      cambios.cuenta_contable = undefined;
+    }
+  }
+  if (centro_costo !== undefined) {
+    if (centro_costo === null) {
+      cambios.centro_costo = null;
+    } else if (typeof centro_costo?.id === 'number' && typeof centro_costo?.codigo === 'string') {
+      cambios.centro_costo = { id: centro_costo.id, codigo: centro_costo.codigo, nombre: String(centro_costo.nombre || centro_costo.codigo) };
+    } else {
+      return res.status(400).json({ detail: "El centro de costo debe incluir id y código de Siigo." });
+    }
+  }
+
+  const items = (factura.items || []).map(i => (i.linea === numLinea ? { ...i, ...cambios } : i));
+  try {
+    const updated = await CloudSqlService.updateFactura(id, { items } as Partial<Factura>);
+    factura.items = items;
+    db.saveToDisk();
+    await CloudSqlService.addModificacion({
+      autor_id: (req as any).usuario?.id_usuario,
+      autor_nombre: (req as any).usuario?.nombre_completo || 'Usuario no identificado',
+      tipo_accion: 'PUC_UPDATE',
+      descripcion: `Línea ${numLinea} de ${factura.factura_num}: cuenta ${cambios.cuenta_contable ?? 'sin cambio'}, centro de costo ${cambios.centro_costo ? cambios.centro_costo.codigo : (cambios.centro_costo === null ? 'quitado' : 'sin cambio')}`,
+      detalles: `Tercero: ${factura.nit_tercero} (${factura.proveedor})`
+    }).catch(() => {});
+    res.json(updated || factura);
+  } catch (err: any) {
+    res.status(500).json({ detail: "No se pudo guardar la línea en la base de datos: " + err.message });
   }
 });
 

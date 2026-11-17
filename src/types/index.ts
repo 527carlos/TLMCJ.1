@@ -134,6 +134,8 @@ export interface FacturaItem {
   iva_porc?: number;
   inc?: number;
   cuenta_contable?: string;
+  /** Centro de costo de Siigo asignado a la línea */
+  centro_costo?: { id: number; codigo: string; nombre: string } | null;
 }
 
 export interface ParteFactura {
