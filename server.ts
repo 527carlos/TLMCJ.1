@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -8,6 +9,8 @@ import { EmpresaStorageService } from './src/server/services/empresaStorageServi
 import { ExcelService } from './src/server/services/excelService.ts';
 import { CloudSqlService } from './src/server/services/cloudSqlService.ts';
 import { db } from './src/server/storage/dataStore.ts';
+import { mailer } from './src/server/services/mailer.ts';
+import { guardarApi } from './src/server/services/sessionAuth.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,6 +19,9 @@ async function startServer() {
   const app = express();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
   const isProd = process.env.NODE_ENV === 'production';
+
+  // Detrás de un proxy (Render, Nginx...) la IP real viene en X-Forwarded-For
+  if (process.env.TRUST_PROXY === 'true') app.set('trust proxy', 1);
 
   app.use(cors());
   app.use(express.json({ limit: '50mb' }));
@@ -51,6 +57,8 @@ async function startServer() {
   app.use(express.static(path.resolve(__dirname, 'public')));
 
   // API v1 Routers
+  // Sesión obligatoria en toda la API (salvo login y recuperación); se aplica antes de los routers
+  app.use('/api/v1', guardarApi);
   app.use('/api/v1', tlmRouter);
   app.use('/api/v1', apiRouter);
 
@@ -82,6 +90,9 @@ async function startServer() {
       res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
     });
   }
+
+  const correo = await mailer.verify();
+  console.log(`[Correo] ${correo.ok ? 'OK' : 'ATENCIÓN'}: ${correo.message}`);
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Consola TLM] Servidor unificado ejecutándose en http://0.0.0.0:${PORT}`);

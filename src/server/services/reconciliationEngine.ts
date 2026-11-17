@@ -64,7 +64,7 @@ export class ReconciliationEngineService {
       }
     }
 
-    // Step 2: Exact Amount within +/- 5 days
+    // Step 2: Amount within tolerance and +/- 7 days
     for (const b of bancoRows) {
       if (matchedBancoIds.has(b.id)) continue;
 

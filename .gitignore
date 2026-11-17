@@ -15,3 +15,6 @@ data/conciliaciones_empresas.json
 
 # Configuración de notificaciones generada en tiempo de ejecución (la persistente está en PostgreSQL)
 data/notificaciones_config.json
+
+# Datos locales (contienen usuarios; no se versionan)
+data/tlm_database.json

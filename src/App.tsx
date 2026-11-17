@@ -57,6 +57,13 @@ export default function App() {
     return null;
   });
 
+  // Cierra la sesión en el servidor (borra la cookie) y luego en la interfaz
+  const cerrarSesion = async () => {
+    await fetch('/api/v1/auth/logout', { method: 'POST' }).catch(() => undefined);
+    handleSelectUser(null);
+    setIsAuthModalOpen(true);
+  };
+
   const handleSelectUser = (u: Usuario | null) => {
     setCurrentUser(u);
     setIsAuthModalOpen(false);
@@ -217,16 +224,6 @@ export default function App() {
         (u: Usuario, index: number, self: Usuario[]) => index === self.findIndex((t) => t.id_usuario === u.id_usuario)
       );
       setUsuarios(uniqueUsuarios);
-      if (uniqueUsuarios.length > 0) {
-        const savedId = localStorage.getItem('tlm_current_user_id');
-        if (savedId) {
-          const match = uniqueUsuarios.find((u: Usuario) => u.id_usuario === Number(savedId));
-          if (match) {
-            setCurrentUser(match);
-            localStorage.setItem('tlm_current_user', JSON.stringify(match));
-          }
-        }
-      }
 
       // 7. Initial Conciliacion run
       const resConcil = await fetch('/api/v1/conciliacion/ejecutar', {
@@ -267,25 +264,19 @@ export default function App() {
     }
   };
 
-  const loadUsuariosOnly = async () => {
-    try {
-      const resUsuarios = await fetch('/api/v1/auth/usuarios');
-      const dataUsuarios = await resUsuarios.json();
-      const uniqueUsuarios = (Array.isArray(dataUsuarios) ? dataUsuarios : []).filter(
-        (u: Usuario, index: number, self: Usuario[]) => index === self.findIndex((t) => t.id_usuario === u.id_usuario)
-      );
-      setUsuarios(uniqueUsuarios);
-    } catch (err) {
-      console.error("Error cargando usuarios para login:", err);
-    }
-  };
+  // Al abrir la página: recupera la sesión existente o muestra el inicio de sesión
+  useEffect(() => {
+    fetch('/api/v1/auth/sesion')
+      .then(res => (res.ok ? res.json() : null))
+      .then(user => {
+        if (user) handleSelectUser(user);
+        else setIsAuthModalOpen(true);
+      })
+      .catch(() => setIsAuthModalOpen(true));
+  }, []);
 
   useEffect(() => {
-    if (currentUser) {
-      loadData();
-    } else {
-      loadUsuariosOnly();
-    }
+    if (currentUser) loadData();
   }, [activeEmpresa?.id_empresa, currentUser?.id_usuario]);
 
   useEffect(() => {
@@ -662,7 +653,7 @@ export default function App() {
             currentUser={null}
             usuarios={usuarios.length > 0 ? usuarios : (currentUser ? [] : [])}
             onSelectUser={handleSelectUser}
-            onLogout={() => handleSelectUser(null)}
+            onLogout={cerrarSesion}
             onShowToast={showToast}
             onRefreshUsers={loadData}
             onUpdateAvatar={handleUpdateAvatar}
@@ -912,7 +903,7 @@ export default function App() {
         currentUser={currentUser}
         usuarios={usuarios}
         onSelectUser={handleSelectUser}
-        onLogout={() => handleSelectUser(null)}
+        onLogout={cerrarSesion}
         onShowToast={showToast}
         onRefreshUsers={loadData}
         onUpdateAvatar={handleUpdateAvatar}

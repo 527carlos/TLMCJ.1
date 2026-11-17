@@ -15,9 +15,21 @@ import { SqlGeneratorService } from '../services/sqlGeneratorService.ts';
 import { CloudSqlService } from '../services/cloudSqlService.ts';
 import { reconnectPool, getActiveConnectionConfig, parseConnectionString } from '../../db/index.ts';
 import { EmpresaStorageService } from '../services/empresaStorageService.ts';
-import type { Factura, FacturaItem } from '../domain/types.ts';
+import type { Factura, FacturaItem, Usuario } from '../domain/types.ts';
+import crypto from 'crypto';
+import { hashPassword, isHashed, verifyPassword, matchesLegacyPassword } from '../services/passwordHasher.ts';
+import { startSession, endSession, getSessionUser } from '../services/sessionAuth.ts';
+import { mailer } from '../services/mailer.ts';
+import { secondsLocked, recordFailure, lockFor, clearAttempts } from '../services/attemptLimiter.ts';
 
 const router = Router();
+
+// Número dentro de un rango; null si no es un número válido
+function numeroEnRango(valor: unknown, min: number, max: number): number | null {
+  if (valor === '' || valor === null || valor === undefined) return null;
+  const n = Number(valor);
+  return Number.isFinite(n) && n >= min && n <= max ? n : null;
+}
 
 // Nunca enviar al navegador hashes de contraseña, códigos OTP ni llaves de Siigo
 const usuarioPublico = (u: any) => {
@@ -26,11 +38,7 @@ const usuarioPublico = (u: any) => {
   return resto;
 };
 /** Usuario que hace la solicitud (encabezado x-tlm-user-id enviado por la interfaz) */
-const usuarioSolicitante = async (req: Request) => {
-  const id = Number(req.headers['x-tlm-user-id']);
-  if (!id) return null;
-  return (await CloudSqlService.getUsuarioById(id).catch(() => null)) || db.usuarios.find(u => u.id_usuario === id) || null;
-};
+const usuarioSolicitante = async (req: Request) => (req as any).usuario || null;
 const esAdministrador = (u: any) => Boolean(u && (u.rol === 'Administrador' || u.rol === 'Desarrollador' || u.permisos?.administrador));
 /** Un usuario no administrador solo ve las empresas que tiene asignadas */
 const visiblesPara = (lista: any[], u: any) => (!u || esAdministrador(u) ? lista : lista.filter(e => (u.empresas_ids || []).includes(e.id_empresa)));
@@ -57,44 +65,100 @@ export function validatePasswordRule(pwd: string): { ok: boolean; message?: stri
   return { ok: true };
 }
 
+// ==========================================
+// AUTENTICACIÓN: sesión firmada, límite de intentos, contraseñas cifradas y recuperación por correo
+// ==========================================
+// Límites de intentos de inicio de sesión y de recuperación
+const LOGIN_MAX_POR_CUENTA = 5;
+const LOGIN_MAX_POR_IP = 30;
+const LOGIN_VENTANA_MS = 15 * 60 * 1000;
+const LOGIN_BLOQUEO_MS = 15 * 60 * 1000;
+const CODIGO_ESPERA_MS = 60 * 1000; // tiempo mínimo entre dos códigos del mismo correo
+
+/** Busca la cuenta por correo: primero en Cloud SQL y luego en el almacenamiento local. */
+async function buscarUsuarioPorCorreo(correo: string): Promise<any | null> {
+  const local = db.usuarios.find(u => u.email.toLowerCase() === correo);
+  if (local) return local;
+  return (await CloudSqlService.getUsuarioByEmail(correo).catch(() => null)) || null;
+}
+
+/** Guarda la contraseña (siempre cifrada) en Cloud SQL y en el almacenamiento local. */
+async function guardarClave(user: any, hash: string, extra: Record<string, unknown> = {}) {
+  await CloudSqlService.updateUsuario(user.id_usuario, { hashed_password: hash, ...extra } as any).catch(() => null);
+  const local = db.usuarios.find(u => u.id_usuario === user.id_usuario);
+  if (local) Object.assign(local, { hashed_password: hash, ...extra });
+  db.saveToDisk();
+}
+
+function passwordMatches(user: any, password: string): boolean {
+  const stored = user.hashed_password || '';
+  return isHashed(stored) ? verifyPassword(password, stored) : matchesLegacyPassword(password, stored);
+}
+
+/** Los códigos de recuperación se guardan con hash, nunca en texto plano. */
+function hashCodigo(codigo: string): string {
+  return crypto.createHash('sha256').update(codigo.trim()).digest('hex');
+}
+
+/** Envía una contraseña provisional por correo. Devuelve false si el correo no está configurado o falla. */
+async function enviarProvisionalPorCorreo(user: any, password: string): Promise<boolean> {
+  if (!mailer.enabled) return false;
+  try {
+    await mailer.send(
+      user.email,
+      'Tu acceso a Consola TLM - contraseña provisional',
+      `Hola ${user.nombre_completo},\n\nTu contraseña provisional es: ${password}\n\nAl iniciar sesión deberás cambiarla por una contraseña personal de mínimo 8 caracteres con letras y números.`
+    );
+    return true;
+  } catch (e) {
+    console.warn('[Correo] No se pudo enviar la contraseña provisional:', e);
+    return false;
+  }
+}
+
 router.post('/auth/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
-  // Consultar usuario en línea a Google Cloud SQL
-  let user = await CloudSqlService.getUsuarioByEmail(email || '');
-  if (!user) {
-    user = db.usuarios.find(u => u.email.toLowerCase() === (email || '').toLowerCase().trim()) || null;
+  const correo = String(email || '').toLowerCase().trim();
+  const claveCuenta = `login:cuenta:${correo}`;
+  const claveIp = `login:ip:${req.ip}`;
+
+  // Bloqueo por cuenta (5 fallos) y por IP (30 fallos), ambos de 15 minutos
+  const segundosBloqueado = Math.max(secondsLocked(claveCuenta), secondsLocked(claveIp));
+  if (segundosBloqueado > 0) {
+    res.set('Retry-After', String(segundosBloqueado));
+    return res.status(429).json({ detail: `Demasiados intentos fallidos. Intenta de nuevo en ${Math.ceil(segundosBloqueado / 60)} minuto(s).` });
   }
 
-  if (!user) {
-    return res.status(401).json({ detail: "Credenciales inválidas. Verifica tu correo corporativo." });
-  }
+  const fallo = (detail: string, status = 401) => {
+    recordFailure(claveCuenta, LOGIN_MAX_POR_CUENTA, LOGIN_VENTANA_MS, LOGIN_BLOQUEO_MS);
+    recordFailure(claveIp, LOGIN_MAX_POR_IP, LOGIN_VENTANA_MS, LOGIN_BLOQUEO_MS);
+    return res.status(status).json({ detail });
+  };
 
+  const user = await buscarUsuarioPorCorreo(correo);
+  if (!user) return fallo('Credenciales inválidas. Verifica tu correo corporativo.');
   if (!user.activo) {
-    return res.status(403).json({ detail: "Tu cuenta está pendiente de aprobación por el Administrador Maestro (Juan Yaya)." });
+    return res.status(403).json({ detail: 'Tu cuenta está pendiente de aprobación por el Administrador Maestro (Juan Yaya).' });
+  }
+  // La contraseña es obligatoria: sin ella nunca se inicia sesión
+  if (!password || typeof password !== 'string' || !user.hashed_password) {
+    return fallo('Credenciales inválidas. Verifica tu correo corporativo.');
+  }
+  if (!passwordMatches(user, password)) {
+    return fallo('Contraseña incorrecta. Si la olvidaste, puedes generar un código de recuperación a tu correo corporativo.');
   }
 
-  // Verificar coincidencia de contraseña si fue enviada
-  if (password && user.hashed_password) {
-    const isMatched = 
-      user.hashed_password === password ||
-      user.hashed_password === `hash_${password}` ||
-      (user.id_usuario === 1 && (password === 'admin123' || password === 'admin_hashed_token')) ||
-      (user.id_usuario === 5 && (password === 'colab123' || password === 'colab_andres_token')) ||
-      (user.id_usuario === 6 && (password === 'colab123' || password === 'colab_valentina_token')) ||
-      password === 'admin123' ||
-      password === 'colab123';
-
-    if (!isMatched) {
-      return res.status(401).json({ detail: "Contraseña incorrecta. Si la olvidaste, puedes generar un código de recuperación a tu correo corporativo." });
-    }
+  clearAttempts(claveCuenta);
+  // Migración: una clave antigua en texto plano se guarda cifrada al iniciar sesión
+  if (!isHashed(user.hashed_password)) {
+    await guardarClave(user, hashPassword(password));
   }
+  startSession(res, user);
 
-  // Verificar si requiere cambio obligatorio de contraseña en primer inicio
   const mustChange = user.requiere_cambio_password === true;
-
   res.json({
     access_token: `token_bearer_${user.id_usuario}`,
-    token_type: "bearer",
+    token_type: 'bearer',
     usuario_id: user.id_usuario,
     usuario_nombre: user.nombre_completo,
     email: user.email,
@@ -103,324 +167,260 @@ router.post('/auth/login', async (req: Request, res: Response) => {
     avatar_url: user.avatar_url || null,
     requiere_cambio_password: mustChange,
     usuario: usuarioPublico(user),
-    mensaje_seguridad: mustChange 
-      ? "Contraseña provisional detectada asignada por el Administrador. Debes cambiarla obligatoriamente a una contraseña alfanumérica de mínimo 8 caracteres antes de continuar."
+    mensaje_seguridad: mustChange
+      ? 'Contraseña provisional detectada asignada por el Administrador. Debes cambiarla obligatoriamente a una contraseña alfanumérica de mínimo 8 caracteres antes de continuar.'
       : undefined
   });
 });
 
+// Usuario de la sesión actual (la interfaz lo usa al abrir la página)
+router.get('/auth/sesion', (req: Request, res: Response) => {
+  const user = getSessionUser(req);
+  if (!user) return res.status(401).json({ detail: 'No hay sesión activa.' });
+  res.json(usuarioPublico(user));
+});
+
+router.post('/auth/logout', (_req: Request, res: Response) => {
+  endSession(res);
+  res.json({ ok: true });
+});
+
+// Solo cambia la contraseña de la sesión activa, y exige la clave actual cuando se envía
 router.post('/auth/cambiar-password', async (req: Request, res: Response) => {
-  const { email, usuario_id, password_actual, nueva_password, confirmar_password } = req.body;
-  let user = usuario_id ? await CloudSqlService.getUsuarioById(Number(usuario_id)) : (email ? await CloudSqlService.getUsuarioByEmail(email) : null);
-  if (!user) {
-    user = db.usuarios.find(u => 
-      (usuario_id && u.id_usuario === Number(usuario_id)) || 
-      (email && u.email.toLowerCase() === email.toLowerCase().trim())
-    ) || null;
-  }
+  const user = (req as any).usuario;
+  const { password_actual, nueva_password, confirmar_password } = req.body;
 
-  if (!user) {
-    return res.status(404).json({ detail: "Usuario no encontrado." });
+  if (password_actual && !passwordMatches(user, String(password_actual))) {
+    return res.status(401).json({ detail: 'La contraseña actual es incorrecta.' });
   }
-
   if (nueva_password !== confirmar_password) {
-    return res.status(400).json({ detail: "La confirmación no coincide con la nueva contraseña." });
+    return res.status(400).json({ detail: 'La confirmación no coincide con la nueva contraseña.' });
   }
-
   const checkRule = validatePasswordRule(nueva_password);
-  if (!checkRule.ok) {
-    return res.status(400).json({ detail: checkRule.message });
-  }
-
+  if (!checkRule.ok) return res.status(400).json({ detail: checkRule.message });
   if (password_actual && password_actual === nueva_password) {
-    return res.status(400).json({ detail: "La nueva contraseña debe ser diferente a la contraseña actual/provisional." });
+    return res.status(400).json({ detail: 'La nueva contraseña debe ser diferente a la contraseña actual/provisional.' });
   }
 
-  // Actualizar en Cloud SQL
-  await CloudSqlService.updateUsuario(user.id_usuario, {
-    hashed_password: "hash_" + nueva_password,
-    requiere_cambio_password: false
-  }).catch(() => {});
-
-  const uLocal = db.usuarios.find(u => u.id_usuario === user!.id_usuario);
-  if (uLocal) {
-    uLocal.hashed_password = "hash_" + nueva_password;
-    uLocal.requiere_cambio_password = false;
-    uLocal.ultimo_cambio_password = new Date().toISOString();
-  }
-  db.saveToDisk();
-
+  await guardarClave(user, hashPassword(nueva_password), { requiere_cambio_password: false, ultimo_cambio_password: new Date().toISOString() });
   db.addNotificacionSeguridad({
     destinatario: user.email,
-    asunto: "Confirmación de Cambio de Contraseña - Consola TLM",
-    tipo: "PASSWORD_CAMBIADA",
-    mensaje: `Hola ${user.nombre_completo}, tu contraseña corporativa ha sido actualizada exitosamente y cumple con el estándar alfanumérico seguro. Tu cuenta se encuentra protegida.`
+    asunto: 'Confirmación de Cambio de Contraseña - Consola TLM',
+    tipo: 'PASSWORD_CAMBIADA',
+    mensaje: `Hola ${user.nombre_completo}, tu contraseña corporativa ha sido actualizada exitosamente. Tu cuenta se encuentra protegida.`
   });
-
-  db.addModificacion({
-    autor_id: user.id_usuario,
-    autor_nombre: user.nombre_completo,
-    autor_email: user.email,
-    autor_rol: user.rol,
-    tipo_accion: "CONFIG_UPDATE",
-    descripcion: `Actualización de contraseña segura alfanumérica para ${user.nombre_completo}`,
-    detalles: `Estándar de seguridad de 8+ caracteres alfanuméricos aplicado. Estado: Sin contraseña provisional pendiente.`
-  });
-
-  res.json({
-    ok: true,
-    mensaje: "¡Contraseña actualizada con éxito! Tus credenciales ahora están protegidas.",
-    usuario: user
-  });
+  res.json({ ok: true, mensaje: '¡Contraseña actualizada con éxito! Tus credenciales ahora están protegidas.' });
 });
 
 router.post('/auth/usuarios/crear-por-admin', async (req: Request, res: Response) => {
   const { nombre_completo, email, rol, password_provisional, empresas_ids, autor_id, autor_nombre } = req.body;
-
   if (!nombre_completo || !email || !password_provisional) {
-    return res.status(400).json({ detail: "Nombre completo, correo corporativo y contraseña provisional son obligatorios." });
+    return res.status(400).json({ detail: 'Nombre completo, correo corporativo y contraseña provisional son obligatorios.' });
   }
-
-  const existingUsers = await CloudSqlService.getUsuarios();
-  const exists = existingUsers.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
-  if (exists) {
-    return res.status(400).json({ detail: "El correo electrónico ya se encuentra registrado." });
+  const correo = String(email).toLowerCase().trim();
+  if (await buscarUsuarioPorCorreo(correo)) {
+    return res.status(400).json({ detail: 'El correo electrónico ya se encuentra registrado.' });
   }
-
   const checkRule = validatePasswordRule(password_provisional);
-  if (!checkRule.ok) {
-    return res.status(400).json({ detail: `La contraseña provisional asignada por Juan debe cumplir la política: ${checkRule.message}` });
-  }
+  if (!checkRule.ok) return res.status(400).json({ detail: `La contraseña provisional debe cumplir la política: ${checkRule.message}` });
 
   const roleValue = (['Administrador', 'Contador', 'Analista', 'Auditor'].includes(rol) ? rol : 'Analista') as any;
-
-  try {
-    const createdUser = await CloudSqlService.createUsuario({
-      nombre_completo: nombre_completo.trim(),
-      email: email.toLowerCase().trim(),
-      hashed_password: "hash_" + password_provisional,
-      rol: roleValue,
-      activo: true,
-      requiere_cambio_password: true,
-      empresas_ids: Array.isArray(empresas_ids) && empresas_ids.length > 0 ? empresas_ids : [1],
-      permisos: getDefaultPermissions(roleValue),
-    });
-
-    db.usuarios.push(createdUser);
-    db.saveToDisk();
-
-    // Notificación oficial enviada al correo corporativo del nuevo usuario
-    const notif = db.addNotificacionSeguridad({
-      destinatario: createdUser.email,
-      asunto: "Credenciales de Acceso a Consola TLM - Contraseña Provisional",
-      tipo: "NUEVO_USUARIO",
-      mensaje: `Estimado/a ${createdUser.nombre_completo}, Juan Yaya (Administrador Maestro) ha habilitado tu acceso a la Consola TLM Enterprise en Google Cloud. Tu contraseña provisional es: "${password_provisional}". IMPORTANTE: Al iniciar sesión por primera vez, el sistema te solicitará obligatoriamente cambiarla por una contraseña alfanumérica personal de mínimo 8 caracteres.`
-    });
-
-    await CloudSqlService.addModificacion({
-      autor_id: autor_id || 1,
-      autor_nombre: autor_nombre || "Juan Yaya - Administrador Maestro",
-      tipo_accion: "COLABORACION",
-      descripcion: `Creación de usuario ${createdUser.nombre_completo} (${createdUser.rol}) sincronizado con Cloud SQL por Juan`,
-      detalles: `Cuenta activada en PostgreSQL (peak-sunset-511516-q7) con requisito forzado de cambio de clave. Notificación enviada a ${createdUser.email}.`
-    });
-
-    res.status(201).json({
-      ok: true,
-      mensaje: `Usuario ${createdUser.nombre_completo} creado con éxito en Google Cloud SQL.`,
-      usuario: createdUser,
-      notificacion: notif
-    });
-  } catch (err: any) {
-    res.status(500).json({ detail: err.message || 'Error creando usuario en Cloud SQL' });
-  }
-});
-
-router.post('/auth/usuarios/:id/reset-password-admin', (req: Request, res: Response) => {
-  const id = parseInt(req.params.id);
-  const { nueva_password_provisional, autor_id, autor_nombre } = req.body;
-  const user = db.usuarios.find(u => u.id_usuario === id);
-
-  if (!user) {
-    return res.status(404).json({ detail: "Usuario no encontrado." });
-  }
-
-  if (!nueva_password_provisional) {
-    return res.status(400).json({ detail: "Debes ingresar una contraseña provisional para el usuario." });
-  }
-
-  const checkRule = validatePasswordRule(nueva_password_provisional);
-  if (!checkRule.ok) {
-    return res.status(400).json({ detail: checkRule.message });
-  }
-
-  user.hashed_password = "hash_" + nueva_password_provisional;
-  user.requiere_cambio_password = true; // Exigir cambio en el próximo ingreso
-  user.codigo_recuperacion = null;
-  user.codigo_recuperacion_expira = null;
-  user.ultimo_cambio_password = new Date().toISOString();
+  const idNuevo = Math.max(...db.usuarios.map(u => u.id_usuario), 0) + 1;
+  const nuevo: any = {
+    id_usuario: idNuevo,
+    nombre_completo: String(nombre_completo).trim(),
+    email: correo,
+    hashed_password: hashPassword(password_provisional),
+    rol: roleValue,
+    activo: true,
+    requiere_cambio_password: true,
+    empresas_ids: Array.isArray(empresas_ids) && empresas_ids.length > 0 ? empresas_ids : [1],
+    permisos: getDefaultPermissions(roleValue),
+    ultimo_cambio_password: new Date().toISOString()
+  };
+  const creado = await CloudSqlService.createUsuario(nuevo).catch(() => null);
+  if (creado) nuevo.id_usuario = creado.id_usuario;
+  db.usuarios.push(nuevo);
   db.saveToDisk();
 
-  const notif = db.addNotificacionSeguridad({
-    destinatario: user.email,
-    asunto: "Restablecimiento de Contraseña por Administrador - Consola TLM",
-    tipo: "RESET_ADMIN",
-    mensaje: `Hola ${user.nombre_completo}, el Administrador Maestro (Juan Yaya) ha restablecido tu acceso corporativo. Tu nueva contraseña provisional es: "${nueva_password_provisional}". Al iniciar sesión, el sistema te solicitará cambiarla obligatoriamente por una contraseña personal de mínimo 8 caracteres alfanuméricos.`
+  // La clave provisional no se guarda en las notificaciones: va por correo, o la recibe el administrador
+  db.addNotificacionSeguridad({
+    destinatario: nuevo.email,
+    asunto: 'Credenciales de Acceso a Consola TLM',
+    tipo: 'NUEVO_USUARIO',
+    mensaje: `Estimado/a ${nuevo.nombre_completo}, el administrador habilitó tu acceso a la Consola TLM. La contraseña provisional se entregó por separado.`
   });
-
+  const correoEnviado = await enviarProvisionalPorCorreo(nuevo, password_provisional);
   db.addModificacion({
-    autor_id: autor_id || 1,
-    autor_nombre: autor_nombre || "Juan Yaya - Administrador Maestro",
-    tipo_accion: "CONFIG_UPDATE",
-    descripcion: `Restablecimiento de contraseña para ${user.nombre_completo} por Juan Yaya`,
-    detalles: `Clave temporal asignada y notificada a ${user.email}. Usuario forzado a cambio alfanumérico.`
+    autor_id: (req as any).usuario?.id_usuario ?? autor_id,
+    autor_nombre: (req as any).usuario?.nombre_completo || autor_nombre || 'Usuario no identificado',
+    tipo_accion: 'COLABORACION',
+    descripcion: `Creación de usuario ${nuevo.nombre_completo} (${nuevo.rol})`,
+    detalles: `Cuenta con cambio de clave obligatorio al primer ingreso. Correo enviado: ${correoEnviado ? 'sí' : 'no'}.`
   });
 
-  res.json({
+  res.status(201).json({
     ok: true,
-    mensaje: `Contraseña provisional asignada a ${user.nombre_completo}. Notificación de seguridad generada para ${user.email}.`,
-    usuario: user,
-    notificacion: notif
+    mensaje: `Usuario ${nuevo.nombre_completo} creado. Deberá cambiar su contraseña al iniciar sesión.`,
+    correo_enviado: correoEnviado,
+    password_provisional: correoEnviado ? undefined : password_provisional,
+    usuario: usuarioPublico(nuevo)
   });
 });
 
-// Recuperación de Contraseña mediante Código OTP de 6 dígitos
-router.post('/auth/recuperar-password/solicitar-codigo', (req: Request, res: Response) => {
-  const { email } = req.body;
-  if (!email) {
-    return res.status(400).json({ detail: "Ingresa tu correo electrónico corporativo." });
-  }
+router.post('/auth/usuarios/:id/reset-password-admin', async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const { nueva_password_provisional } = req.body;
+  const user: any = db.usuarios.find(u => u.id_usuario === id) || (await CloudSqlService.getUsuarioById(id).catch(() => null));
+  if (!user) return res.status(404).json({ detail: 'Usuario no encontrado.' });
+  if (!nueva_password_provisional) return res.status(400).json({ detail: 'Debes ingresar una contraseña provisional para el usuario.' });
+  const checkRule = validatePasswordRule(nueva_password_provisional);
+  if (!checkRule.ok) return res.status(400).json({ detail: checkRule.message });
 
-  const user = db.usuarios.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
-  if (!user) {
-    return res.status(404).json({ detail: "No existe ninguna cuenta corporativa registrada con este correo." });
-  }
-
-  if (!user.activo) {
-    return res.status(403).json({ detail: "Esta cuenta está inactiva o pendiente de aprobación por Juan Yaya." });
-  }
-
-  // Generar código OTP seguro de 6 dígitos
-  const codigoOtp = Math.floor(100000 + Math.random() * 900000).toString();
-  const expira = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 minutos
-
-  user.codigo_recuperacion = codigoOtp;
-  user.codigo_recuperacion_expira = expira;
-  db.saveToDisk();
-
-  const notif = db.addNotificacionSeguridad({
-    destinatario: user.email,
-    asunto: `Código de Seguridad [${codigoOtp}] para Recuperación de Contraseña - TLM`,
-    tipo: "CODIGO_RECUPERACION",
-    codigo_otp: codigoOtp,
-    mensaje: `Hola ${user.nombre_completo}, has solicitado restablecer tu contraseña en la Consola TLM. Tu código de seguridad confidencial es: [${codigoOtp}]. Este código expira en 15 minutos. Si tú no realizaste esta solicitud, comunícate de inmediato con Juan Yaya (automatizaciones@tlm.net.co).`
-  });
-
-  // Con un proveedor de correo configurado el código solo viaja por correo; sin proveedor (modo demostración) se muestra en pantalla
-  const correoReal = CorreoService.estado().configurado;
-  res.json({
-    ok: true,
-    mensaje: correoReal
-      ? `Se envió un código de seguridad de 6 dígitos a ${user.email}. Revise también la carpeta de spam.`
-      : `No hay correo configurado en el servidor: el código se muestra en pantalla (modo demostración).`,
-    email: user.email,
-    codigo_simulado: correoReal ? undefined : codigoOtp,
-    correo_enviado: correoReal,
-    expira_en_minutos: 15,
-    notificacion: correoReal ? ocultarSecretos(notif) : notif
-  });
-});
-
-router.post('/auth/recuperar-password/verificar-y-cambiar', (req: Request, res: Response) => {
-  const { email, codigo, nueva_password, confirmar_password } = req.body;
-
-  if (!email || !codigo || !nueva_password) {
-    return res.status(400).json({ detail: "Correo, código de seguridad y nueva contraseña son requeridos." });
-  }
-
-  const user = db.usuarios.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
-  if (!user) {
-    return res.status(404).json({ detail: "Usuario no encontrado." });
-  }
-
-  if (!user.codigo_recuperacion || user.codigo_recuperacion.trim() !== codigo.toString().trim()) {
-    return res.status(400).json({ detail: "El código de seguridad ingresado es incorrecto." });
-  }
-
-  if (user.codigo_recuperacion_expira && new Date() > new Date(user.codigo_recuperacion_expira)) {
-    return res.status(400).json({ detail: "El código de seguridad ha expirado (validez: 15 minutos). Solicita un nuevo código." });
-  }
-
-  if (nueva_password !== confirmar_password) {
-    return res.status(400).json({ detail: "La confirmación no coincide con la nueva contraseña." });
-  }
-
-  const checkRule = validatePasswordRule(nueva_password);
-  if (!checkRule.ok) {
-    return res.status(400).json({ detail: checkRule.message });
-  }
-
-  user.hashed_password = "hash_" + nueva_password;
-  user.codigo_recuperacion = null;
-  user.codigo_recuperacion_expira = null;
-  user.requiere_cambio_password = false;
-  user.ultimo_cambio_password = new Date().toISOString();
-  db.saveToDisk();
-
+  await guardarClave(user, hashPassword(nueva_password_provisional), { requiere_cambio_password: true, codigo_recuperacion: null, codigo_recuperacion_expira: null });
   db.addNotificacionSeguridad({
     destinatario: user.email,
-    asunto: "Contraseña Recuperada y Restablecida con Éxito - TLM",
-    tipo: "PASSWORD_CAMBIADA",
-    mensaje: `Hola ${user.nombre_completo}, tu contraseña corporativa ha sido restablecida exitosamente mediante código de seguridad OTP. Ahora puedes ingresar normalmente con tus nuevas credenciales.`
+    asunto: 'Restablecimiento de Contraseña por Administrador - Consola TLM',
+    tipo: 'RESET_ADMIN',
+    mensaje: `Hola ${user.nombre_completo}, el administrador restableció tu acceso. La nueva contraseña provisional se entregó por separado. Deberás cambiarla al iniciar sesión.`
   });
-
+  const correoEnviado = await enviarProvisionalPorCorreo(user, nueva_password_provisional);
   res.json({
     ok: true,
-    mensaje: "¡Contraseña recuperada y actualizada con éxito! Ya puedes iniciar sesión con tus nuevas credenciales.",
-    usuario: user
+    mensaje: `Contraseña provisional asignada a ${user.nombre_completo}.`,
+    correo_enviado: correoEnviado,
+    password_provisional: correoEnviado ? undefined : nueva_password_provisional,
+    usuario: usuarioPublico(user)
+  });
+});
+
+// Código de recuperación por correo. La respuesta es igual exista o no la cuenta.
+router.post('/auth/recuperar-password/solicitar-codigo', async (req: Request, res: Response) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ detail: 'Ingresa tu correo electrónico corporativo.' });
+  if (!mailer.enabled) {
+    return res.status(503).json({ detail: 'El envío de códigos por correo no está configurado. Pide al administrador que defina SMTP_HOST en el servidor.' });
+  }
+  const correo = String(email).toLowerCase().trim();
+  const claveCodigo = `codigo:${correo}`;
+  const espera = secondsLocked(claveCodigo);
+  if (espera > 0) {
+    res.set('Retry-After', String(espera));
+    return res.status(429).json({ detail: `Espera ${espera} segundos antes de pedir otro código.` });
+  }
+  lockFor(claveCodigo, CODIGO_ESPERA_MS);
+
+  const respuestaGenerica = {
+    ok: true,
+    mensaje: 'Si el correo está registrado, recibirás un código de seguridad de 6 dígitos en los próximos minutos.',
+    expira_en_minutos: 15
+  };
+  const user: any = await buscarUsuarioPorCorreo(correo);
+  if (!user || !user.activo) return res.json(respuestaGenerica);
+
+  const codigoOtp = crypto.randomInt(100000, 1000000).toString();
+  try {
+    await mailer.send(user.email, 'Código de seguridad - Consola TLM',
+      `Hola ${user.nombre_completo},\n\nTu código de seguridad para restablecer la contraseña es: ${codigoOtp}\n\nExpira en 15 minutos. Si tú no lo solicitaste, ignora este correo y avisa a Juan Yaya (automatizaciones@tlm.net.co).`);
+  } catch (e) {
+    console.warn('[Correo] No se pudo enviar el código de recuperación:', e);
+    return res.status(502).json({ detail: 'No pudimos enviar el correo con el código. Intenta más tarde.' });
+  }
+  // Solo se guarda el hash del código y se cuentan los intentos fallidos
+  await guardarClave(user, user.hashed_password, {
+    codigo_recuperacion: hashCodigo(codigoOtp),
+    codigo_recuperacion_expira: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    intentos_codigo: 0
+  });
+  db.addNotificacionSeguridad({
+    destinatario: user.email,
+    asunto: 'Solicitud de recuperación de contraseña - TLM',
+    tipo: 'CODIGO_RECUPERACION',
+    mensaje: `Se envió un código de recuperación al correo de ${user.nombre_completo}. El código no se muestra en esta consola.`
+  });
+  res.json(respuestaGenerica);
+});
+
+router.post('/auth/recuperar-password/verificar-y-cambiar', async (req: Request, res: Response) => {
+  const { email, codigo, nueva_password, confirmar_password } = req.body;
+  if (!email || !codigo || !nueva_password) {
+    return res.status(400).json({ detail: 'Correo, código de seguridad y nueva contraseña son requeridos.' });
+  }
+  const correo = String(email).toLowerCase().trim();
+  const mensajeIncorrecto = 'El código de seguridad ingresado es incorrecto.';
+  const claveRecuperacion = `recuperar:${correo}`;
+  const espera = secondsLocked(claveRecuperacion);
+  if (espera > 0) {
+    res.set('Retry-After', String(espera));
+    return res.status(429).json({ detail: `Demasiados intentos fallidos. Intenta de nuevo en ${Math.ceil(espera / 60)} minuto(s).` });
+  }
+
+  const user: any = await buscarUsuarioPorCorreo(correo);
+  if (!user || !user.codigo_recuperacion) {
+    recordFailure(claveRecuperacion, LOGIN_MAX_POR_CUENTA, LOGIN_VENTANA_MS, LOGIN_BLOQUEO_MS);
+    return res.status(400).json({ detail: mensajeIncorrecto });
+  }
+  if (user.codigo_recuperacion_expira && new Date() > new Date(user.codigo_recuperacion_expira)) {
+    await guardarClave(user, user.hashed_password, { codigo_recuperacion: null });
+    return res.status(400).json({ detail: 'El código de seguridad ha expirado (validez: 15 minutos). Solicita un nuevo código.' });
+  }
+  if ((user.intentos_codigo || 0) >= 5) {
+    await guardarClave(user, user.hashed_password, { codigo_recuperacion: null });
+    return res.status(429).json({ detail: 'Demasiados intentos fallidos. Solicita un nuevo código de seguridad.' });
+  }
+  if (user.codigo_recuperacion !== hashCodigo(String(codigo))) {
+    recordFailure(claveRecuperacion, LOGIN_MAX_POR_CUENTA, LOGIN_VENTANA_MS, LOGIN_BLOQUEO_MS);
+    await guardarClave(user, user.hashed_password, { intentos_codigo: (user.intentos_codigo || 0) + 1 });
+    return res.status(400).json({ detail: mensajeIncorrecto });
+  }
+  clearAttempts(claveRecuperacion);
+
+  if (nueva_password !== confirmar_password) {
+    return res.status(400).json({ detail: 'La confirmación no coincide con la nueva contraseña.' });
+  }
+  const checkRule = validatePasswordRule(nueva_password);
+  if (!checkRule.ok) return res.status(400).json({ detail: checkRule.message });
+
+  await guardarClave(user, hashPassword(nueva_password), {
+    codigo_recuperacion: null, codigo_recuperacion_expira: null, intentos_codigo: 0,
+    requiere_cambio_password: false, ultimo_cambio_password: new Date().toISOString()
+  });
+  db.addNotificacionSeguridad({
+    destinatario: user.email,
+    asunto: 'Contraseña Recuperada y Restablecida con Éxito - TLM',
+    tipo: 'PASSWORD_CAMBIADA',
+    mensaje: `Hola ${user.nombre_completo}, tu contraseña corporativa fue restablecida mediante código de seguridad.`
+  });
+  res.json({
+    ok: true,
+    mensaje: '¡Contraseña recuperada y actualizada con éxito! Ya puedes iniciar sesión con tus nuevas credenciales.',
+    usuario: usuarioPublico(user)
   });
 });
 
 router.get('/auth/notificaciones-seguridad', (_req: Request, res: Response) => {
-  // Los códigos y contraseñas nunca se exponen en el historial
-  res.json(db.notificacionesSeguridad.map(ocultarSecretos));
+  res.json(db.notificacionesSeguridad);
 });
 
-router.post('/auth/register', (req: Request, res: Response) => {
+router.post('/auth/register', async (req: Request, res: Response) => {
   const { nombre_completo, email, password } = req.body;
-  if (!email || !nombre_completo) {
-    return res.status(400).json({ detail: "Nombre completo y correo son requeridos." });
-  }
+  if (!email || !nombre_completo) return res.status(400).json({ detail: 'Nombre completo y correo son requeridos.' });
+  const correo = String(email).toLowerCase().trim();
+  if (await buscarUsuarioPorCorreo(correo)) return res.status(400).json({ detail: 'El correo electrónico ya se encuentra registrado.' });
+  const checkRule = validatePasswordRule(password);
+  if (!checkRule.ok) return res.status(400).json({ detail: checkRule.message });
 
-  const exists = db.usuarios.find(u => u.email.toLowerCase() === email.toLowerCase());
-  if (exists) {
-    return res.status(400).json({ detail: "El correo electrónico ya se encuentra registrado." });
-  }
-
-  const checkRule = validatePasswordRule(password || 'analista123');
-  if (!checkRule.ok) {
-    return res.status(400).json({ detail: checkRule.message });
-  }
-
-  const nuevoUsuario = {
-    id_usuario: Math.max(...db.usuarios.map(u => u.id_usuario), 0) + 1,
-    nombre_completo,
-    email,
-    hashed_password: "hash_" + password,
-    rol: 'Analista' as const,
-    activo: false,
-    requiere_cambio_password: false,
-    empresas_ids: [1],
-    permisos: getDefaultPermissions('Analista')
+  const idNuevo = Math.max(...db.usuarios.map(u => u.id_usuario), 0) + 1;
+  const nuevo: any = {
+    id_usuario: idNuevo, nombre_completo: String(nombre_completo).trim(), email: correo,
+    hashed_password: hashPassword(password), rol: 'Analista', activo: false,
+    requiere_cambio_password: false, empresas_ids: [1], permisos: getDefaultPermissions('Analista')
   };
-
-  db.usuarios.push(nuevoUsuario);
+  const creado = await CloudSqlService.createUsuario(nuevo).catch(() => null);
+  if (creado) nuevo.id_usuario = creado.id_usuario;
+  db.usuarios.push(nuevo);
   db.saveToDisk();
-  NotificacionesService.avisarAdminsRegistro(nuevoUsuario).catch(() => {});
-  res.status(201).json({
-    mensaje: "Registro solicitado correctamente. Un Administrador debe aprobar su acceso.",
-    id_usuario: nuevoUsuario.id_usuario
-  });
+  res.status(201).json({ mensaje: 'Registro solicitado correctamente. Un Administrador debe aprobar su acceso.', id_usuario: nuevo.id_usuario });
 });
 
 router.get('/auth/usuarios', async (_req: Request, res: Response) => {
@@ -643,7 +643,7 @@ router.put('/sistema/branding', (req: Request, res: Response) => {
     subtitulo,
     temaAcento,
     sidebarColor,
-    autor_nombre: autor_nombre || "Juan Yaya - Administrador Maestro"
+    autor_nombre: (req as any).usuario?.nombre_completo || 'Usuario no identificado'
   });
   res.json({
     mensaje: "Identidad visual y logotipos actualizados exitosamente por el Administrador Juan Yaya.",
@@ -725,92 +725,16 @@ router.post('/sistema/generar-excel', (req: Request, res: Response) => {
 // ==========================================
 router.get('/sistema/google-cloud-status', (_req: Request, res: Response) => {
   res.json({
-    conectado: true,
-    proveedor: "Google Cloud Platform (GCP)",
-    servicio: "Google Cloud Run (Serverless Container Platform)",
-    region: "us-east1",
-    project_id: "395382435000",
-    service_account: "automatizaciones@tlm.net.co",
-    app_url: "https://ais-pre-jm2qqpvuit56ogjeno6hay-395382435000.us-east1.run.app",
-    dev_url: "https://ais-dev-jm2qqpvuit56ogjeno6hay-395382435000.us-east1.run.app",
-    entorno: process.env.NODE_ENV || "production",
-    instancia: {
-      runtime: `Node.js ${process.version}`,
-      puerto: process.env.PORT || 3000,
-      escalabilidad: "Autoscaling Dinámico (0 a N instancias Cloud Run)",
-      memoria_asignada: "1024 MB",
-      cpu_asignada: "1 vCPU",
-      uptime_segundos: Math.floor(process.uptime())
-    },
-    servicios_gcp: [
-      {
-        id: "cloud-run",
-        nombre: "Google Cloud Run",
-        tipo: "Cómputo & Microservicios",
-        estado: "ACTIVO & SALUDABLE",
-        detalles: "Aloja el backend de Consola TLM con balanceador HTTPS global y certificados TLS gestionados por Google.",
-        badge: "En ejecución"
-      },
-      {
-        id: "google-drive",
-        nombre: "Google Drive Corporativo (Drive de Juan Yaya)",
-        tipo: "Repositorio de Documentos & Facturas",
-        estado: "CONECTADO & SINCRONIZADO",
-        detalles: "Carpeta central compartida de Google Drive (automatizaciones@tlm.net.co) para ingesta de XMLs DIAN, extractos bancarios y copias del Repositorio v2.0.",
-        badge: "Drive Activo"
-      },
-      {
-        id: "cloud-storage",
-        nombre: "Google Cloud Storage (GCS)",
-        tipo: "Almacenamiento de Archivos",
-        estado: "CONECTADO",
-        detalles: "Bucket optimizado para ingesta masiva de archivos XML UBL 2.1, extractos bancarios y backups JSON.",
-        badge: "Bucket Activo"
-      },
-      {
-        id: "cloud-iam",
-        nombre: "Google Cloud IAM & Roles",
-        tipo: "Seguridad & Gobierno",
-        estado: "VINCULADO",
-        detalles: "Políticas de identidad federadas para Juan Yaya (Admin Maestro) y equipo colaborador.",
-        badge: "RLS Protegido"
-      },
-      {
-        id: "cloud-logging",
-        nombre: "Google Cloud Logging & Monitoring",
-        tipo: "Observabilidad & Telemetría",
-        estado: "CONECTADO",
-        detalles: "Registro inmutable de auditoría CUFE, liquidaciones F350 y eventos de sincronización Siigo.",
-        badge: "Logs en vivo"
-      }
-    ],
-    google_drive: db.getGoogleDriveStatus(),
-    latencia_ms: 18,
-    ultima_sincronizacion: new Date().toISOString()
+    conectado: false,
+    mensaje: 'La integración con Google Cloud no está configurada en este servidor.',
+    proveedor: 'Google Cloud Platform (GCP)',
+    entorno: process.env.NODE_ENV || 'production'
   });
 });
 
-router.post('/sistema/google-cloud-sync', (req: Request, res: Response) => {
-  const { autor_id, autor_nombre, notas } = req.body;
-  const hash = 'gcp-' + Math.random().toString(36).substring(2, 9);
-  
-  const mod = db.addModificacion({
-    autor_id: autor_id || 1,
-    autor_nombre: autor_nombre || "Juan Yaya - Administrador Maestro",
-    tipo_accion: "GCP_SYNC",
-    descripcion: `Sincronización y despliegue del Repositorio v2.0 a Google Cloud Platform (${hash})`,
-    detalles: notas || "Snapshot atómico de base de datos y esquemas contables replicado en infraestructura Google Cloud Run."
-  });
-
-  res.json({
-    ok: true,
-    mensaje: "¡Repositorio v2.0 de Juan sincronizado exitosamente con Google Cloud!",
-    hash_despliegue: hash,
-    region: "us-east1",
-    servicio: "Google Cloud Run",
-    timestamp: new Date().toISOString(),
-    modificacion: mod
-  });
+router.post('/sistema/google-cloud-sync', (_req: Request, res: Response) => {
+  // Sin integración configurada no se registra ninguna sincronización falsa
+  res.status(501).json({ ok: false, simulado: true, detail: 'La sincronización con Google Cloud no está configurada en este servidor. No se realizó ningún despliegue.' });
 });
 
 // Sincronización de Identidades & Permisos de Usuarios con Google Cloud IAM
@@ -820,7 +744,7 @@ router.post('/sistema/google-cloud-iam-sync', (req: Request, res: Response) => {
   
   const mod = db.addModificacion({
     autor_id: autor_id || 1,
-    autor_nombre: autor_nombre || "Juan Yaya - Administrador Maestro",
+    autor_nombre: (req as any).usuario?.nombre_completo || 'Usuario no identificado',
     tipo_accion: "GCP_SYNC",
     descripcion: `Sincronización de ${db.usuarios.length} identidades con Google Cloud IAM (${hash})`,
     detalles: `Roles y privilegios de usuarios TLM sincronizados con Google Cloud IAM (us-east1) y Cloud Run por ${autor_nombre || 'Juan Yaya'}.`
@@ -963,13 +887,13 @@ router.get('/repositorio/juan', async (_req: Request, res: Response) => {
     res.json({
       info: db.getRepositorioInfo(),
       modificaciones: modificaciones.length > 0 ? modificaciones : db.modificaciones,
-      usuarios_colaboradores: usuarios.filter(u => u.activo)
+      usuarios_colaboradores: usuarios.filter(u => u.activo).map(usuarioPublico)
     });
   } catch (err) {
     res.json({
       info: db.getRepositorioInfo(),
       modificaciones: db.modificaciones,
-      usuarios_colaboradores: db.usuarios.filter(u => u.activo)
+      usuarios_colaboradores: db.usuarios.filter(u => u.activo).map(usuarioPublico)
     });
   }
 });
@@ -983,9 +907,9 @@ router.post('/repositorio/juan/modificacion', async (req: Request, res: Response
   try {
     const mod = await CloudSqlService.addModificacion({
       autor_id: autor_id ? Number(autor_id) : 1,
-      autor_nombre: autor_nombre || "Juan Yaya - Administrador Maestro",
-      autor_email,
-      autor_rol,
+      autor_nombre: (req as any).usuario?.nombre_completo || 'Usuario no identificado',
+      autor_email: (req as any).usuario?.email,
+      autor_rol: (req as any).usuario?.rol,
       tipo_accion: tipo_accion || 'COLABORACION',
       descripcion,
       detalles
@@ -1010,7 +934,7 @@ router.post('/repositorio/juan/consolidar-v2', async (req: Request, res: Respons
   try {
     const mod = await CloudSqlService.addModificacion({
       autor_id: autor_id || 1,
-      autor_nombre: autor_nombre || "Juan Yaya - Administrador Maestro",
+      autor_nombre: (req as any).usuario?.nombre_completo || 'Usuario no identificado',
       tipo_accion: "RELEASE_V2",
       descripcion: `Consolidación oficial de release: Versión 2.0 arrojada en Repositorio Central de Juan`,
       detalles: notas || "Árbol de cambios colaborativos sincronizado con éxito en Google Cloud SQL."
@@ -1055,7 +979,7 @@ router.get('/sistema/export-backup', async (_req: Request, res: Response) => {
     info: db.getDatabaseInfo(),
     modificaciones,
     data: {
-      usuarios,
+      usuarios: usuarios.map(usuarioPublico),
       empresas,
       facturas,
       cuentasPUC,
@@ -1287,13 +1211,13 @@ router.post('/sistema/cloud-migration', async (req: Request, res: Response) => {
   // 4. Registrar auditoría inmutable en Cloud SQL
   const mod = await CloudSqlService.addModificacion({
     autor_id: autor_id || 1,
-    autor_nombre: autor_nombre || "Juan Yaya - Administrador Maestro",
+    autor_nombre: (req as any).usuario?.nombre_completo || 'Usuario no identificado',
     tipo_accion: "GCP_SYNC",
     descripcion: `Migración Integral de Base de Datos a Google Cloud (${migrationId})`,
     detalles: notas || `Migración y verificación de 8 tablas relacionales (${db.facturas.length} facturas, ${db.usuarios.length} usuarios, ${db.cuentasPUC.length} cuentas PUC) en Google Cloud SQL (peak-sunset-511516-q7).`
   }).catch(() => db.addModificacion({
     autor_id: autor_id || 1,
-    autor_nombre: autor_nombre || "Juan Yaya - Administrador Maestro",
+    autor_nombre: (req as any).usuario?.nombre_completo || 'Usuario no identificado',
     tipo_accion: "GCP_SYNC",
     descripcion: `Migración Integral de Base de Datos a Google Cloud (${migrationId})`,
     detalles: notas || `Migración exitosa a Google Cloud.`
@@ -1822,6 +1746,8 @@ router.post('/facturas/bulk-delete', async (req: Request, res: Response) => {
 
 router.patch('/facturas/:id/estado', async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
+  const ESTADOS_AUDITORIA = ['PENDIENTE', 'AUDITADA', 'RECHAZADA'];
+  if (!ESTADOS_AUDITORIA.includes(req.body.estado)) return res.status(400).json({ detail: 'Estado no válido. Usa uno de: ' + ESTADOS_AUDITORIA.join(', ') + '.' });
   const { estado, autor_nombre, autor_id } = req.body;
   try {
     const updated = await CloudSqlService.updateFactura(id, { estado_revision: estado });
@@ -1830,7 +1756,7 @@ router.patch('/facturas/:id/estado', async (req: Request, res: Response) => {
 
     await CloudSqlService.addModificacion({
       autor_id: autor_id ? Number(autor_id) : undefined,
-      autor_nombre: autor_nombre || (req.headers['x-user-name'] as string) || "Juan Yaya",
+      autor_nombre: (req as any).usuario?.nombre_completo || 'Usuario no identificado',
       tipo_accion: 'FACTURA_AUDITADA',
       descripcion: `Cambio de estado en factura ${updated?.factura_num || id}: → ${estado}`,
       detalles: `Auditoría registrada en vivo en Google Cloud SQL (peak-sunset-511516-q7).`
@@ -1853,6 +1779,7 @@ async function cuentaEnPlanDeEmpresa(idEmpresa: number, cuenta: string): Promise
 
 router.patch('/facturas/:id/cuenta', async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
+  if (typeof req.body.cuenta_gasto !== 'string' || !req.body.cuenta_gasto.trim()) return res.status(400).json({ detail: 'Indique la cuenta contable de gasto.' });
   const { cuenta_gasto, autor_nombre, autor_id } = req.body;
   const facturaActual = db.facturas.find(f => f.id_factura === id);
   if (facturaActual && cuenta_gasto) {
@@ -1866,7 +1793,7 @@ router.patch('/facturas/:id/cuenta', async (req: Request, res: Response) => {
 
     await CloudSqlService.addModificacion({
       autor_id: autor_id ? Number(autor_id) : undefined,
-      autor_nombre: autor_nombre || (req.headers['x-user-name'] as string) || "Juan Yaya",
+      autor_nombre: (req as any).usuario?.nombre_completo || 'Usuario no identificado',
       tipo_accion: 'PUC_UPDATE',
       descripcion: `Reclasificación PUC en ${updated?.factura_num || id}: → ${cuenta_gasto}`,
       detalles: `Tercero: ${updated?.nit_tercero || ''} (${updated?.proveedor || ''})`
@@ -1930,6 +1857,8 @@ router.patch('/facturas/:id/lineas/:linea', async (req: Request, res: Response) 
 
 router.patch('/facturas/:id/retencion', async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
+  if (req.body.retencion_porc !== undefined && numeroEnRango(req.body.retencion_porc, 0, 100) === null) return res.status(400).json({ detail: 'La tarifa de retención debe estar entre 0 y 100.' });
+  if (req.body.casilla_350 !== undefined && numeroEnRango(req.body.casilla_350, 1, 999) === null) return res.status(400).json({ detail: 'La casilla del F350 no es válida.' });
   const { retencion_porc, casilla_350, autor_nombre, autor_id } = req.body;
   try {
     const facturas = await CloudSqlService.getFacturas();
@@ -1955,7 +1884,7 @@ router.patch('/facturas/:id/retencion', async (req: Request, res: Response) => {
 
     await CloudSqlService.addModificacion({
       autor_id: autor_id ? Number(autor_id) : undefined,
-      autor_nombre: autor_nombre || (req.headers['x-user-name'] as string) || "Juan Yaya",
+      autor_nombre: (req as any).usuario?.nombre_completo || 'Usuario no identificado',
       tipo_accion: 'FACTURA_UPDATE',
       descripcion: `Ajuste tributario F350 en ${updated?.factura_num || id}: tarifa ${rPorc}%, casilla ${casilla_350}`,
       detalles: `Retención calculada en Cloud SQL: $${rVal.toLocaleString('es-CO')} COP.`
@@ -1969,6 +1898,7 @@ router.patch('/facturas/:id/retencion', async (req: Request, res: Response) => {
 
 router.patch('/facturas/:id/reteica', async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
+  if (numeroEnRango(req.body.reteica_tarifa, 0, 50) === null) return res.status(400).json({ detail: 'La tarifa de ReteICA debe estar entre 0 y 50 por mil.' });
   const { reteica_tarifa, autor_nombre, autor_id } = req.body;
   const f = db.facturas.find(fact => fact.id_factura === id);
   if (!f) return res.status(404).json({ detail: "Factura no encontrada." });
@@ -1978,7 +1908,7 @@ router.patch('/facturas/:id/reteica', async (req: Request, res: Response) => {
 
   await CloudSqlService.addModificacion({
     autor_id: autor_id ? Number(autor_id) : undefined,
-    autor_nombre: autor_nombre || (req.headers['x-user-name'] as string) || "Juan Yaya",
+    autor_nombre: (req as any).usuario?.nombre_completo || 'Usuario no identificado',
     tipo_accion: 'FACTURA_UPDATE',
     descripcion: `Actualización tarifa ReteICA ${f.factura_num} a ${f.reteica_tarifa}‰`,
     detalles: `Proveedor: ${f.proveedor} en Cloud SQL`
@@ -1989,6 +1919,7 @@ router.patch('/facturas/:id/reteica', async (req: Request, res: Response) => {
 
 router.patch('/facturas/:id/reteiva', async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
+  if (numeroEnRango(req.body.reteiva_porc, 0, 100) === null) return res.status(400).json({ detail: 'La tarifa de ReteIVA debe estar entre 0 y 100.' });
   const { reteiva_porc, autor_nombre, autor_id } = req.body;
   const f = db.facturas.find(fact => fact.id_factura === id);
   if (!f) return res.status(404).json({ detail: "Factura no encontrada." });
@@ -1998,7 +1929,7 @@ router.patch('/facturas/:id/reteiva', async (req: Request, res: Response) => {
 
   await CloudSqlService.addModificacion({
     autor_id: autor_id ? Number(autor_id) : undefined,
-    autor_nombre: autor_nombre || (req.headers['x-user-name'] as string) || "Juan Yaya",
+    autor_nombre: (req as any).usuario?.nombre_completo || 'Usuario no identificado',
     tipo_accion: 'FACTURA_UPDATE',
     descripcion: `Actualización tarifa ReteIVA ${f.factura_num} a ${f.reteiva_porc}%`,
     detalles: `Proveedor: ${f.proveedor} en Cloud SQL`
@@ -2009,6 +1940,7 @@ router.patch('/facturas/:id/reteiva', async (req: Request, res: Response) => {
 
 router.patch('/facturas/:id/medio-pago', async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
+  if (typeof req.body.medio_pago !== 'string' || !req.body.medio_pago.trim()) return res.status(400).json({ detail: 'Indique el medio de pago.' });
   const { medio_pago, autor_nombre, autor_id } = req.body;
   const f = db.facturas.find(fact => fact.id_factura === id);
   if (!f) return res.status(404).json({ detail: "Factura no encontrada." });
@@ -2018,7 +1950,7 @@ router.patch('/facturas/:id/medio-pago', async (req: Request, res: Response) => 
 
   await CloudSqlService.addModificacion({
     autor_id: autor_id ? Number(autor_id) : undefined,
-    autor_nombre: autor_nombre || (req.headers['x-user-name'] as string) || "Juan Yaya",
+    autor_nombre: (req as any).usuario?.nombre_completo || 'Usuario no identificado',
     tipo_accion: 'FACTURA_UPDATE',
     descripcion: `Medio de pago actualizado en ${f.factura_num}: ${medio_pago}`,
     detalles: `Forma de pago: ${f.forma_pago}`
@@ -2041,9 +1973,12 @@ router.get('/facturas/kpis/resumen', async (req: Request, res: Response) => {
   let totalAuditadas = 0;
 
   facts.forEach(f => {
-    totalSubtotal += f.subtotal || 0;
-    totalIva += f.iva || 0;
-    totalRetencion += f.retencion_valor || 0;
+    // Las notas crédito restan compras e IVA y no generan retención (igual que el F350)
+    const esNota = /nota/i.test(f.tipo_comprobante || '');
+    const signo = esNota ? -1 : 1;
+    totalSubtotal += signo * (f.subtotal || 0);
+    totalIva += signo * (f.iva || 0);
+    if (!esNota) totalRetencion += f.retencion_valor || 0;
     if (f.estado_revision === 'AUDITADA' || f.estado_revision === 'SINCRONIZADA_SIIGO') {
       totalAuditadas++;
     }
