@@ -399,7 +399,8 @@ router.post('/auth/recuperar-password/verificar-y-cambiar', async (req: Request,
 });
 
 router.get('/auth/notificaciones-seguridad', (_req: Request, res: Response) => {
-  res.json(db.notificacionesSeguridad);
+  // Los códigos y contraseñas nunca se exponen en el historial
+  res.json(db.notificacionesSeguridad.map(ocultarSecretos));
 });
 
 router.post('/auth/register', async (req: Request, res: Response) => {
