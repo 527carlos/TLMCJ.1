@@ -463,6 +463,19 @@ router.get('/empresas/:id/dashboard', conEmpresa, async (req, res) => {
 const credencialesDe = (e: Empresa): CredencialesSiigo | null =>
   e.siigo_username && e.siigo_access_key ? { username: e.siigo_username, access_key: e.siigo_access_key } : null;
 
+/** Centros de costo de Siigo de la empresa activa (para asignarlos a cada línea de factura). */
+router.get('/empresas/:id/siigo/centros-costo', conEmpresa, async (req, res) => {
+  const e = empresaDe(req);
+  const cred = credencialesDe(e);
+  if (!cred) return res.json({ conectado: false, centros: [], mensaje: 'Configure las credenciales de Siigo de esta empresa para cargar sus centros de costo.' });
+  try {
+    const centros = await siigoService.centrosCosto(cred, req.query.refrescar === '1');
+    res.json({ conectado: true, centros, mensaje: centros.length ? null : 'Siigo no devolvió centros de costo para esta empresa.' });
+  } catch (err: any) {
+    res.json({ conectado: false, centros: [], mensaje: 'No se pudieron cargar los centros de costo de Siigo: ' + err.message });
+  }
+});
+
 /** Catálogos para los desplegables: los de Siigo si la empresa está conectada, o el catálogo DIAN contingente. */
 router.get('/empresas/:id/siigo/catalogos', conEmpresa, async (req, res) => {
   const e = empresaDe(req);

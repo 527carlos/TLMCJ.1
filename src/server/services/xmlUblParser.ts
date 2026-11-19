@@ -378,8 +378,12 @@ export class XmlUblParserService {
 
       if (subtotalVal === 0 && items.length) subtotalVal = items.reduce((s, it) => s + it.subtotal, 0);
       if (ivaVal === 0 && items.length) ivaVal = items.reduce((s, it) => s + it.iva, 0);
-      if (subtotalVal === 0 && totalVal > 0) subtotalVal = ivaVal > 0 ? totalVal - ivaVal : Math.round(totalVal / 1.19);
+      // Solo se deriva el subtotal si el XML trae el IVA; nunca se asume una tarifa
+      if (subtotalVal === 0 && totalVal > 0 && ivaVal > 0) subtotalVal = totalVal - ivaVal;
       if (totalVal === 0) totalVal = subtotalVal + ivaVal;
+      // Sin proveedor ni valores no se inventa nada: la factura se rechaza
+      if (!emisor.nit || !emisor.razon_social) throw new Error('La factura no identifica al proveedor (NIT o razón social).');
+      if (subtotalVal === 0) throw new Error('La factura no trae el valor del subtotal (LineExtensionAmount).');
 
       const lineas: LineaUbl[] = items.length
         ? items

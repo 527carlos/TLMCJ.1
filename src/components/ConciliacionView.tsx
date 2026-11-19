@@ -199,7 +199,9 @@ export const ConciliacionView: React.FC<Props> = ({ idEmpresa, nombreEmpresa, on
     }
   };
 
-  const todasSel = resultado ? seleccion.length === resultado.faltan_en_libros.length && seleccion.length > 0 : false;
+  // Filas visibles con el filtro actual: la selección de cabecera solo actúa sobre ellas
+  const visiblesLibros = useMemo(() => (resultado?.faltan_en_libros || []).filter(m => coincide(m.fecha, m.descripcion, m.comprobante, m.tercero, m.valor)), [resultado, textoFiltro, fechaFiltro]);
+  const todasSel = visiblesLibros.length > 0 && visiblesLibros.every(m => seleccion.includes(m.id));
   const totalSel = useMemo(() => (resultado?.faltan_en_libros || []).filter(m => seleccion.includes(m.id)).reduce((s, m) => s + m.valor, 0), [resultado, seleccion]);
 
   const ArchivoInput: React.FC<{ etiqueta: string; archivo: File | null; previo?: string; accept: string; onChange: (f: File | null) => void }> = ({ etiqueta, archivo, previo, accept, onChange }) => (
@@ -365,12 +367,12 @@ export const ConciliacionView: React.FC<Props> = ({ idEmpresa, nombreEmpresa, on
                 <table className="w-full text-[11px]">
                   <thead className="text-slate-400 uppercase text-[9px] sticky top-0 bg-white">
                     <tr>
-                      <th className="py-2 px-3 w-6"><input type="checkbox" checked={todasSel} onChange={() => setSeleccion(todasSel ? [] : resultado.faltan_en_libros.map(m => m.id))} /></th>
+                      <th className="py-2 px-3 w-6"><input type="checkbox" checked={todasSel} onChange={() => setSeleccion(todasSel ? seleccion.filter(id => !visiblesLibros.some(m => m.id === id)) : [...new Set([...seleccion, ...visiblesLibros.map(m => m.id)])])} /></th>
                       <th className="text-left">Fecha</th><th className="text-left">Comprobante / Descripción</th><th className="text-right px-3">Valor</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {resultado.faltan_en_libros.filter(m => coincide(m.fecha, m.descripcion, m.comprobante, m.tercero, m.valor)).map(m => (
+                    {visiblesLibros.map(m => (
                       <tr key={m.id}>
                         <td className="py-1.5 px-3"><input type="checkbox" checked={seleccion.includes(m.id)} onChange={() => setSeleccion(seleccion.includes(m.id) ? seleccion.filter(x => x !== m.id) : [...seleccion, m.id])} /></td>
                         <td className="py-1.5 pr-2 font-mono text-red-700 whitespace-nowrap">{m.fecha}</td>

@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { hashPassword } from '../services/passwordHasher.ts';
 import path from 'path';
 import type { Usuario, PermisosUsuario, Empresa, Factura, CuentaPUC, BalanceTercero, MovimientoBancario, MovimientoLibro, ModificacionRepositorio, RepositorioInfo, NotificacionSeguridad, GoogleDriveConfig, GoogleDriveFile, GoogleDriveStatus, DesarrolladorAcceso, PermisosCodigo } from '../domain/types.ts';
 
@@ -91,8 +92,35 @@ export class DataStore {
   constructor() {
     if (!this.loadFromDisk()) {
       this.initSeedData();
+      // En producción no se crean las cuentas de demostración (sus claves están en el código)
+      // ni las facturas de ejemplo: solo el administrador de ADMIN_EMAIL / ADMIN_PASSWORD.
+      if (process.env.NODE_ENV === 'production') {
+        this.usuarios = [this.adminInicialProduccion()];
+        this.facturas = [];
+        this.movimientosBanco = [];
+        this.movimientosLibro = [];
+        this.balanceTerceros = [];
+      }
       this.saveToDisk();
     }
+  }
+
+  private adminInicialProduccion(): Usuario {
+    const password = process.env.ADMIN_PASSWORD || '';
+    if (password.length < 8) {
+      throw new Error('Falta ADMIN_PASSWORD (mínimo 8 caracteres). Defínela en el hosting antes del primer arranque en producción.');
+    }
+    return {
+      id_usuario: 1,
+      nombre_completo: 'Juan Yaya - Administrador Maestro',
+      email: (process.env.ADMIN_EMAIL || 'automatizaciones@tlm.net.co').toLowerCase().trim(),
+      hashed_password: hashPassword(password),
+      rol: 'Administrador',
+      activo: true,
+      requiere_cambio_password: false,
+      empresas_ids: [1, 2],
+      permisos: getDefaultPermissions('Administrador')
+    };
   }
 
   public saveToDisk() {
@@ -177,7 +205,8 @@ export class DataStore {
           this.movimientosBanco = dump.movimientosBanco || [];
           this.movimientosLibro = dump.movimientosLibro || [];
           this.modificaciones = dump.modificaciones || [];
-          this.notificacionesSeguridad = dump.notificacionesSeguridad || [];
+          // Quita códigos de recuperación guardados por versiones anteriores
+          this.notificacionesSeguridad = (dump.notificacionesSeguridad || []).map(({ codigo_otp, ...n }: any) => n);
 
           if (dump.googleDriveConfig) {
             this.googleDriveConfig = { ...this.googleDriveConfig, ...dump.googleDriveConfig };
@@ -225,11 +254,10 @@ export class DataStore {
               {
                 id: "sec-seed-2",
                 destinatario: "automatizaciones@tlm.net.co",
-                asunto: "Código de Seguridad [748291] para Recuperación de Contraseña - TLM",
+                asunto: "Solicitud de recuperación de contraseña - TLM",
                 fecha: new Date(Date.now() - 3600000).toISOString(),
                 tipo: "CODIGO_RECUPERACION",
-                codigo_otp: "748291",
-                mensaje: "Hola Juan Yaya, has solicitado recuperar tu contraseña corporativa. Tu código de seguridad confidencial es: [748291]. Válido por 15 minutos.",
+                mensaje: "Se envió un código de recuperación al correo de Juan Yaya. El código no se muestra en esta consola.",
                 estado: "ENVIADO"
               }
             ];

@@ -940,7 +940,10 @@ export class CloudSqlService {
   // ==========================================
   public static async getCuentasPuc(idEmpresa?: number): Promise<CuentaPUC[]> {
     try {
-      const rows = await drizzleDb.select().from(schema.cuentasPuc).orderBy(schema.cuentasPuc.cuenta);
+      // Con idEmpresa solo devuelve el plan de cuentas de esa empresa; sin él, todas (uso interno de sincronización)
+      const rows = await drizzleDb.select().from(schema.cuentasPuc)
+        .where(idEmpresa ? eq(schema.cuentasPuc.idEmpresa, idEmpresa) : undefined)
+        .orderBy(schema.cuentasPuc.cuenta);
       return rows.map(r => ({
         id_puc: r.id,
         id_empresa: r.idEmpresa || 1,

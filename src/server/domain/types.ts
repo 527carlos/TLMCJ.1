@@ -56,6 +56,7 @@ export interface Usuario {
   requiere_cambio_password?: boolean;
   codigo_recuperacion?: string | null;
   codigo_recuperacion_expira?: string | null;
+  intentos_codigo?: number;
   ultimo_cambio_password?: string;
 }
 
@@ -85,6 +86,8 @@ export interface FacturaItem {
   inc?: number;
   /** Cuenta contable propia de la línea (si se reclasifica individualmente) */
   cuenta_contable?: string;
+  /** Centro de costo de Siigo asignado a la línea */
+  centro_costo?: { id: number; codigo: string; nombre: string } | null;
 }
 
 export interface ParteFactura {

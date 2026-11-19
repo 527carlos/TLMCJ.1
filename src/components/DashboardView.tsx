@@ -172,9 +172,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </h3>
           </div>
 
-          <p className="text-xs sm:text-sm text-indigo-100 max-w-2xl leading-relaxed">
-            Plataforma integral contable y fiscal según los lineamientos de <strong className="text-white">TLM Get Adviced</strong>. Auditoría UBL 2.1 DIAN, conciliación algorítmica y sincronización certificada con Siigo Nube.
-          </p>
         </div>
 
         <div className="flex items-center gap-2.5 relative z-10 flex-wrap">
