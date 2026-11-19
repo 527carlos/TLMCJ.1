@@ -421,6 +421,7 @@ router.post('/auth/register', async (req: Request, res: Response) => {
   if (creado) nuevo.id_usuario = creado.id_usuario;
   db.usuarios.push(nuevo);
   db.saveToDisk();
+  NotificacionesService.avisarAdminsRegistro(nuevo).catch(() => {});
   res.status(201).json({ mensaje: 'Registro solicitado correctamente. Un Administrador debe aprobar su acceso.', id_usuario: nuevo.id_usuario });
 });
 
