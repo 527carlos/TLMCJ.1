@@ -399,7 +399,8 @@ router.post('/auth/recuperar-password/verificar-y-cambiar', async (req: Request,
 });
 
 router.get('/auth/notificaciones-seguridad', (_req: Request, res: Response) => {
-  res.json(db.notificacionesSeguridad);
+  // Los códigos y contraseñas nunca se exponen en el historial
+  res.json(db.notificacionesSeguridad.map(ocultarSecretos));
 });
 
 router.post('/auth/register', async (req: Request, res: Response) => {
@@ -420,6 +421,7 @@ router.post('/auth/register', async (req: Request, res: Response) => {
   if (creado) nuevo.id_usuario = creado.id_usuario;
   db.usuarios.push(nuevo);
   db.saveToDisk();
+  NotificacionesService.avisarAdminsRegistro(nuevo).catch(() => {});
   res.status(201).json({ mensaje: 'Registro solicitado correctamente. Un Administrador debe aprobar su acceso.', id_usuario: nuevo.id_usuario });
 });
 
